@@ -1,5 +1,11 @@
 # PetHub · Desktop Pet (English)
 
+<div align="right">
+
+[![lang](https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-blue)](README.md)
+
+</div>
+
 A little pet that lives on your desktop and keeps an eye on what Qoder, WorkBuddy, Doubao… are doing.
 **Everything it says is reported by the apps themselves — the pet never guesses and never makes things up.**
 

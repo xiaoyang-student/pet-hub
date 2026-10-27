@@ -1,5 +1,11 @@
 # PetHub · 桌面宠物（中文说明）
 
+<div align="right">
+
+[![lang](https://img.shields.io/badge/lang-English-blue)](README.en.md)
+
+</div>
+
 一只住在桌面上的宠物，替你盯着 Qoder、WorkBuddy、豆包……在干什么。
 **它说的话都是应用自己上报的，宠物不猜、不编。**
 
