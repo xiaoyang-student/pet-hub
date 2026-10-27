@@ -1,0 +1,2986 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PetHub 桌宠</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101721'/%3E%3Ccircle cx='32' cy='30' r='17' fill='%237fb2ff'/%3E%3Cellipse cx='17' cy='26' rx='7' ry='11' fill='%23568ce0'/%3E%3Cellipse cx='47' cy='26' rx='7' ry='11' fill='%23568ce0'/%3E%3Ccircle cx='25' cy='27' r='2.6' fill='%23101620'/%3E%3Ccircle cx='39' cy='27' r='2.6' fill='%23101620'/%3E%3Cellipse cx='32' cy='35' rx='5' ry='4' fill='%23cde0fc'/%3E%3Cellipse cx='32' cy='33.5' rx='2.4' ry='1.8' fill='%231e222e'/%3E%3Crect x='14' y='52' width='36' height='6' rx='3' fill='%232e3a4a'/%3E%3Crect x='14' y='52' width='26' height='6' rx='3' fill='%237bd88f'/%3E%3C/svg%3E">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:transparent;
+    font-family:"Microsoft YaHei", system-ui, sans-serif; user-select:none; }
+  body.browser { background:linear-gradient(180deg,#141a23 0%,#0d1117 100%); }
+
+  #cv { position:fixed; inset:0; }
+
+  /* ---------- 右上角任务 HUD ---------- */
+  /* #hud 是"锚点"（收起时就是那颗小球），面板用绝对定位从锚点向屏幕内侧展开：
+     .hud-right → 面板右对齐锚点，向左长；.hud-left → 面板左对齐锚点，向右长。 */
+  #hud { position:fixed; top:14px; right:14px; width:34px; z-index:50; }
+  .hud-panel { position:absolute; top:0; width:var(--hud-w,300px);
+    background:rgba(16,21,28,.88); border:1px solid rgba(120,150,190,.22);
+    border-radius:12px; backdrop-filter:blur(10px); box-shadow:0 6px 24px rgba(0,0,0,.35); }
+  #hud.hud-left  .hud-panel { left:0; right:auto; }
+  #hud.hud-right .hud-panel { right:0; left:auto; }
+  .hud-head { display:flex; align-items:center; gap:8px; padding:9px 12px; cursor:pointer; }
+  .hud-head .t { font-size:12.5px; font-weight:700; color:#dfe8f5; letter-spacing:.5px; flex:1; }
+  .hud-head .n { font-size:11px; color:#8fa4c0; }
+  .hud-head .tg { font-size:11px; color:#6f86a6; border:1px solid rgba(120,150,190,.25);
+    border-radius:6px; padding:1px 7px; }
+  .hud-head .tg:hover { color:#cfe0f5; border-color:#7fa6d0; }
+  .plat { border-top:1px solid rgba(120,150,190,.12); }
+  .plat-head { display:flex; align-items:center; gap:8px; padding:7px 12px; cursor:pointer; }
+  .plat-head:hover { background:rgba(255,255,255,.04); }
+  .plat-dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .plat-name { font-size:12px; color:#c7d4e6; font-weight:600; flex:1; }
+  .plat-sum { font-size:11px; color:#7d90ad; }
+  .plat-arrow { font-size:10px; color:#5d7291; width:12px; text-align:center; }
+  .tasks { padding:2px 10px 9px; display:none; }
+  .plat.open .tasks { display:block; }
+  .task { padding:5px 2px 7px; border-top:1px dashed rgba(120,150,190,.10); cursor:pointer; }
+  .task:first-child { border-top:none; }
+  .task-row { display:flex; align-items:center; gap:7px; }
+  .task-ico { font-size:11px; width:14px; text-align:center; flex:none; }
+  .task-title { font-size:12px; color:#dde6f2; flex:1; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; }
+  .task-pct { font-size:11px; color:#8fa4c0; flex:none; }
+  .bar { height:4px; border-radius:3px; background:rgba(255,255,255,.08);
+    margin-top:5px; overflow:hidden; position:relative; }
+  .bar i { display:block; height:100%; border-radius:3px; transition:width .5s; }
+  .bar.indet i { width:36% !important; animation:slide 1.2s linear infinite; }
+  @keyframes slide { from{margin-left:-40%} to{margin-left:110%} }
+  .task-wait .task-title { color:#ffc861; }
+  .task-wait .bar { background:rgba(255,200,97,.15); }
+  .task-err .task-title { color:#ff7a6e; }
+  .task-done .task-title { color:#8fe3a8; }
+  .task-msg { font-size:10.5px; color:#7286a3; margin-top:3px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; }
+  .hud-mini { display:none; }
+  #hud.hidden .hud-panel { display:none; }
+  #hud.hidden .hud-mini { display:block; }
+  /* 收起后的小球：图案跟着当前宠物变，外圈用宠物的主色 */
+  .hud-mini-btn { position:relative; width:38px; height:38px; border-radius:50%;
+    background:rgba(16,21,28,.88); border:2px solid var(--pet-accent,#7fa6d0);
+    font-size:19px; line-height:1; cursor:pointer; display:flex; align-items:center;
+    justify-content:center; box-shadow:0 4px 14px rgba(0,0,0,.4); transition:transform .15s;
+    -webkit-user-select:none; }
+  .hud-mini-btn:hover { transform:scale(1.08); }
+  .hud-mini-btn .badge { position:absolute; top:-4px; right:-4px; min-width:15px; height:15px;
+    border-radius:8px; background:#ffc861; color:#241a00; font-size:9.5px; font-weight:700;
+    display:none; align-items:center; justify-content:center; padding:0 3px; }
+  .hud-mini-btn .badge.on { display:flex; }
+
+  /* ---------- 宠物气泡 ---------- */
+  #bubble { position:fixed; z-index:60; max-width:240px; background:rgba(240,246,255,.96);
+    color:#1c2530; font-size:13px; line-height:1.5; padding:8px 12px; border-radius:12px;
+    border-bottom-left-radius:4px; box-shadow:0 4px 16px rgba(0,0,0,.3);
+    opacity:0; transform:translateY(6px); transition:.25s; pointer-events:none; }
+  #bubble.show { opacity:1; transform:translateY(0); }
+  #bubble .from { display:block; font-size:10px; color:#7a8aa0; margin-top:3px; }
+
+  /* ---------- 右键菜单 ---------- */
+  #menu { position:fixed; z-index:70; min-width:148px; background:rgba(20,26,35,.96);
+    border:1px solid rgba(120,150,190,.25); border-radius:10px; padding:5px; display:none;
+    box-shadow:0 8px 28px rgba(0,0,0,.45); }
+  #menu .mi { padding:7px 12px; border-radius:7px; font-size:13px; color:#dbe5f2;
+    cursor:pointer; display:flex; gap:9px; align-items:center; }
+  #menu .mi:hover { background:rgba(110,150,210,.18); }
+  #menu .mi.dis { opacity:.4; pointer-events:none; }
+  #menu .sep { height:1px; background:rgba(120,150,190,.15); margin:4px 6px; }
+
+  /* ---------- 提示条 ---------- */
+  #toasts { position:fixed; left:14px; top:14px; z-index:55; display:flex;
+    flex-direction:column; gap:6px; }
+  .toast { background:rgba(16,21,28,.88); border:1px solid rgba(120,150,190,.22);
+    border-radius:10px; padding:7px 12px; font-size:12px; color:#d5e0ef;
+    animation:tin .25s; max-width:320px; }
+  @keyframes tin { from{opacity:0; transform:translateX(-12px)} }
+  .toast b { color:#ffd479; }
+  .note { position:fixed; left:14px; bottom:10px; font-size:10.5px; color:rgba(140,160,190,.5);
+    z-index:40; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="hud" class="hud-right">
+  <div class="hud-panel">
+    <div class="hud-head" id="hudHead">
+      <div class="t">任务进度</div><div class="n" id="hudN"></div>
+      <div class="tg" id="hudHide">收起 ▸</div>
+    </div>
+    <div id="platList"></div>
+  </div>
+  <div class="hud-mini"><div class="hud-mini-btn" id="hudShow" title="">
+    <span id="hudFace">🐱</span><span class="badge" id="hudBadge"></span></div></div>
+</div>
+
+<div id="bubble"></div>
+<div id="menu"></div>
+<div id="toasts"></div>
+<div class="note" id="noteLine" style="display:none">PetHub · 桥接服务未连接时运行内置演示数据</div>
+
+<script>
+"use strict";
+/* ================================================================
+   PetHub 桌宠
+   ① 任务层：SSE 接收任意平台连接器的事件 → 分平台进度条 HUD
+   ② 状态层：饱腹/精力/心情/清洁/健康 + 排泄物 + 生病
+   ③ 交互层：点击互动 / 右键菜单 / 清理 / 生病治疗
+   ================================================================ */
+
+// ---------------- 物种与台词 ----------------
+const SPECIES = {
+  cat:{ name:"猫", accent:"#ffb454",
+    decay:{satiety:.55, energy:.42, mood:.30, hygiene:.22},
+    petLines:["呼噜呼噜……这里，再挠两下。","嗯～你是合格的铲屎官。","（眯眼）可以，摸吧。"],
+    playLines:["扑！抓到你的手了。","再来一次，我还没玩够。"],
+    hungryLines:["食盆空了，我看了你三眼了。","再不开饭，我就踩你键盘。"],
+    sickLines:["不太舒服……帮我叫医生。","（蜷缩）今天不想动。"],
+    cleanLines:["舔毛中，别看。","干净是猫的尊严。"],
+    poopLines:["（刨了两下空气，假装埋了）","解决完了，你懂的。"] },
+  dog:{ name:"狗", accent:"#7fb2ff",
+    decay:{satiety:.62, energy:.50, mood:.40, hygiene:.28},
+    petLines:["摇尾巴摇成风扇！","你终于摸我了！！","（歪头）再来再来！"],
+    playLines:["球呢？！球呢？！","撒腿狂奔中——！"],
+    hungryLines:["碗！空的！你看见了吗！","（叼着碗放你脚边）"],
+    sickLines:["（蔫蔫地趴着）主人……","鼻子干干的，不舒服。"],
+    cleanLines:["洗完澡我要疯狂甩毛！","香喷喷！"],
+    poopLines:["（假装无事发生）","埋了埋了……好吧没埋。"] },
+  rabbit:{ name:"兔", accent:"#f3a6c8",
+    decay:{satiety:.60, energy:.45, mood:.32, hygiene:.20},
+    petLines:["（耳朵放松）可以摸头，别碰肚子。","（轻轻磨牙）舒服。"],
+    playLines:["蹦——看我的急转弯！","绕着你跑三圈！"],
+    hungryLines:["干草架空了！架空了！","（啃咬桌腿抗议）"],
+    sickLines:["（耳朵耷拉）肚子咕咕叫……","（不爱动了）"],
+    cleanLines:["自己会理毛，谢啦。","爪爪干净了。"],
+    poopLines:["（便便是圆球，很快假装无事）","（一蹦一跳离开现场）"] },
+  snake:{ name:"蛇", accent:"#a8e063",
+    decay:{satiety:.12, energy:.10, mood:.06, hygiene:.06},
+    petLines:["（容忍你的手）仅此一次。","冷血不等于冷淡。"],
+    playLines:["（缓慢移动）这也算运动。","（盘成 S 形）蓄力完毕。"],
+    hungryLines:["（吐信）……该投喂了。","（盯着你的手看了很久）"],
+    sickLines:["（鳞片失去光泽）温度不对……","（拒食中，担心我吧）"],
+    cleanLines:["（蜕皮前的安静）","（泡水）可以了。"],
+    poopLines:["（整个消化过程你都没看见）","（悄悄处理干净了）"] },
+  spider:{ name:"蜘蛛", accent:"#c9a0ff",
+    decay:{satiety:.15, energy:.12, mood:.05, hygiene:.08},
+    petLines:["（举起前足）退后……好吧，摸吧。","八条腿都竖起来了，这是开心。"],
+    playLines:["（网上跳舞）看见了吗，绝技。","（荡了一下丝）"],
+    hungryLines:["网在抖。不是猎物，是你。","上次进食是三天前。"],
+    sickLines:["（腿蜷缩）蜕皮期，别碰。","（不动了，但还活着）"],
+    cleanLines:["网刚修补过，很整齐。","（织网中）"],
+    poopLines:["（从网上精准投放）","（丝吊下去清理干净了）"] },
+  chicken:{ name:"鸡", accent:"#ffcf5c",
+    decay:{satiety:.70, energy:.55, mood:.30, hygiene:.30},
+    petLines:["咯咯咯（蹲下让你摸）","（闭眼享受）咯。"],
+    playLines:["扑翅！刨地！冲刺！","（逮到一只虫，炫耀中）"],
+    hungryLines:["谷子！谷子！谷子！","（啄你鞋带）"],
+    sickLines:["（缩成一团打蔫）咯……","（羽毛蓬乱）"],
+    cleanLines:["沙浴中，别打扰。","（抖抖羽毛，灰尘飞起）"],
+    poopLines:["（边走边拉，毫无愧疚）","（咯咯哒，宣告完毕）"] },
+  duck:{ name:"鸭", accent:"#6fd6c4",
+    decay:{satiety:.65, energy:.50, mood:.34, hygiene:.34},
+    petLines:["嘎嘎（用喙轻碰你）","（点头摆尾）嘎！"],
+    playLines:["扑水！甩你一身！","（倒立觅食，屁股朝天）"],
+    hungryLines:["嘎。嘎嘎。碗。","（排队等你撒粮）"],
+    sickLines:["（单脚站立都费劲）嘎……","（羽毛不防水了）"],
+    cleanLines:["理羽中：涂油、捋顺、防水。","（头浸水甩一甩）"],
+    poopLines:["（边游边拉，水很干净，谢谢）","（嘎嘎，事不关己）"] }
+};
+
+// 每个物种的"真实包围盒"（局部坐标，未乘 1.25*petScale）。
+// 点击判定必须盖住整个身体：以前固定 ±95px，点尾巴/耳朵/喙就会穿到桌面文件上。
+const PET_BOX = {
+  cat:    [-72,- 92, 104, 52],
+  dog:    [-80,- 78, 104, 54],
+  rabbit: [-76,-130,  46, 54],
+  snake:  [-102,-34,  52, 72],
+  spider: [-84,- 56,  84, 62],
+  chicken:[-58,- 70,  68, 54],
+  duck:   [-60,- 70, 104, 50],
+};
+const PET_FACE = { cat:"🐱", dog:"🐶", rabbit:"🐰", snake:"🐍", spider:"🕷️", chicken:"🐔", duck:"🦆" };
+
+// ---------------- 任务层 ----------------
+const TASKS = new Map();            // key -> task
+const PLAT_COLORS = { "WorkBuddy":"#4da3ff", "Claude Code":"#ff8a5c", "Codex":"#7bd88f",
+  "Cursor":"#ffd166", "Gemini CLI":"#8ab4f8" };
+const platColor = p => PLAT_COLORS[p] || "#b48cff";
+const STATUS_META = {
+  thinking:{ico:"💭", col:"#b48cff"}, running:{ico:"⚙️", col:"#7bd88f"},
+  waiting:{ico:"⏸️", col:"#ffc861"}, done:{ico:"✅", col:"#8fe3a8"},
+  error:{ico:"❌", col:"#ff7a6e"}
+};
+// ---------------- 语言（中/英 全程一致，绝不串味） ----------------
+// 规则：所有给人看的文字（HUD、状态、宠物台词、菜单、气泡落款）都走 I18N[LANG]，
+// 不允许任何地方硬编码中文/英文，否则切换语言后会一半中一半英。
+let LANG = (window.petHubLang === "en") ? "en" : "zh";
+
+const I18N = {
+  zh: {
+    ui: {
+      hudTitle: "任务进度", collapse: "收起 ▸",
+      tasks: n => `${n} 个任务`, today: n => `今天盯了 ${n} 个`,
+      noTask: "暂无任务 · 等待连接器上报",
+      connected: "PetHub · 桥接服务已连接 (127.0.0.1:8765)",
+      demo: "PetHub · 演示模式（未检测到桥接服务，运行 python bridge/server.py 接入真实平台）",
+    },
+    stats: { satiety: "饱腹", energy: "体力", mood: "心情", hygiene: "卫生", health: "健康" },
+    statusLabel: { running: "执行中", thinking: "思考中", waiting: "等待中", done: "已完成", error: "出错" },
+    sum: { busy: n => `${n} 在忙`, ask: n => `${n} 等你拍板`, wait: n => `${n} 等你处理`,
+           done: n => `${n} 收工`, idle: "闲着呢" },
+    phase: { late: "深夜", dawn: "清晨", morning: "上午", noon: "午后",
+             afternoon: "下午", evening: "傍晚", night: "夜里" },
+    lines: {
+      greeting: "嗨！我在看主人工作哦。点击我互动，右键我有菜单～",
+      stepPoop: "哎呀！！谁没埋好！！（生气地刨空气）",
+      tooTired: "太累了……让我歇会儿。",
+      healthy: "我很健康，别浪费钱。",
+      recovered: "感觉好多了！谢谢主人！",
+      cleaned: n => n ? `清理了 ${n} 处，谢谢你。` : "桌面上很干净哦。",
+      switched: name => `你好，我是${name}！`,
+      feed: "开饭！！", thanks: "谢谢你！",
+      sleep: "晚安……（其实随时会醒）",
+      goodMorning: "（伸了个懒腰）早上好，今天也请多关照。",
+      goodNight: "困了……我去睡了，明早见。",
+      zzz: "Zzz……",
+      hungryHint: "（肚子在叫）",
+      careTag: "贴心提醒",
+      routineTag: "日程提醒",
+      awayToast: h => `你不在的 ${h} 小时里`,
+      heldHigh: "哇！飞起来啦！",
+      pokeLine: "我在这儿呢！别一直点图标，我一直都在。",
+      spawnNew: name => `新来的${name}，报到！`,
+      spawnFull: "住不下了住不下了，最多养 6 只。",
+      // —— 宠物之间的互动台词（先开口的那只说主句，对方用 *2 回嘴）
+      soc: {
+        who: (n, t) => `${n}：${t}`,
+        sniff:  ["（凑过去闻了闻）", "嗯……你的味儿我记下了。"],
+        sniff2: ["（也回闻一下）", "礼尚往来。"],
+        play:   ["来追我呀！", "跑起来跑起来！", "敢不敢比谁快？"],
+        play2:  ["抓到你啦！", "这次换我追你！", "你输定了。"],
+        nuzzle: ["（蹭了蹭对方的脑袋）", "你今天的毛挺顺。"],
+        nuzzle2:["（蹭回去）", "……别闹。"],
+        quarrel:["你踩我尾巴了！", "这块地板是我先占的！", "你吃饭能不能小点声？"],
+        quarrel2:["我又不是故意的！", "谁说的，我先来的！", "嫌吵你戴耳塞啊。"],
+        fight:  ["今天必须分个高下！", "忍你很久了！", "过来，就现在。"],
+        fight2: ["来啊！", "别跑！", "谁怕谁！"],
+        fightToast: w => `${w} 打赢了这一架`,
+        bossLine: name => `${name} 是这里的老大，别惹它。`,
+      },
+      layerToBack: "我先躲到桌面下面去，你点开别的窗口就看不见我啦。（Ctrl+Alt+B 叫我出来）",
+      layerToFront: "我回来啦，现在一直站在最前面。",
+      layerTag: "前后层",
+      climbTag: "爬墙",
+      climbUp: "哇——被扔到天花板上了，我抓着呢！",
+      climbDown: "慢点慢点……这墙好滑。",
+      climbLanded: "（拍了拍爪子）安全着陆。",
+      grabTag: "叼走指针",
+      grabBite: "这个指针归我了！",
+      grabDrop: "还你还你，别生气。",
+      grabLost: "抢回去了，小气。",
+      tripOut: "我出去溜达一圈，很快回来。",
+      tripOuts: ["我出去溜达一圈，很快回来。", "我出去透透气。", "听说外面有好吃的，我去看看。",
+                 "我沿着屏幕边儿走一圈就回来。"],
+      tripBack: "我回来啦！外面风挺大。",
+      tripFriend: name => `路上认识了个${name}，就一起带回来了。`,
+      tripGift: "给你带了点外面捡的小东西。",
+      kicked: name => `${name} 拎着小包袱走了，头也没回。`,
+      kickedTag: "离家出走",
+      kickWarn: "别推我！再推我就真走了啊！",
+      layEgg: name => `……我们好像要有宝宝了。（${name}）`,
+      eggToast: name => `多了一颗蛋，是${name}`,
+      hatch: name => `破壳啦！是一只小${name}。`,
+      hatchToast: name => `孵出来了：${name}`,
+      courting: "两只成年宠物凑在一起了，正在培养感情……",
+      growYoung: name => `${name}长大了一点，跑得更快了。`,
+      growAdult: name => `${name}成年了！可以谈对象了。`,
+      growElder: name => `${name}老了，动作慢下来了，对它温柔点。`,
+      dieOld: name => `${name}睡着了，很安详。它变成了一颗小星星。`,
+      dieWeak: name => `${name}撑不住了……下次照顾好它，好吗。`,
+      stageLabel: { baby:"幼崽", young:"少年", adult:"成年", elder:"老年" },      heldHighCat: "（尾巴炸毛）放、我、下、来。",
+      dropped: "好刺激！再来！",
+      droppedCat: "哼，下次别这样。",
+      sickToast: name => `${name}生病了！右键它选择「看病」`,
+      sickSay: name => `${name} · 生病了！请右键→看病`,
+      cleanedTag: "清理完毕 +卫生", cleanFull: "清洁已满", envUp: "环境整洁度提升",
+      switchTag: "已切换物种", recoveryTag: "健康已恢复",
+    },
+    actions: { feed: "🍚 喂食", pet: "🤚 抚摸", play: "🎾 玩耍", bath: "🛁 清洁",
+               sleep: "💤 睡觉", clean: "🧹 清理排泄物", vet: "🩺 看病",
+               swap: "🐾 换宠物 ▸", lang: "🌐 中文 / English" },
+    pool: {},       // 下方填充
+    species: {},    // 运行时复用 SPECIES 的中文原生台词
+  },
+  en: {
+    ui: {
+      hudTitle: "Tasks", collapse: "Hide ▸",
+      tasks: n => `${n} task${n > 1 ? "s" : ""}`, today: n => `${n} watched today`,
+      noTask: "No tasks yet · waiting for connectors",
+      connected: "PetHub · bridge connected (127.0.0.1:8765)",
+      demo: "PetHub · demo mode (bridge not found — run python bridge/server.py)",
+    },
+    stats: { satiety: "Food", energy: "Energy", mood: "Mood", hygiene: "Clean", health: "Health" },
+    statusLabel: { running: "Running", thinking: "Thinking", waiting: "Waiting",
+                   done: "Done", error: "Failed" },
+    sum: { busy: n => `${n} working`, ask: n => `${n} need your call`,
+           wait: n => `${n} waiting for you`, done: n => `${n} finished`, idle: "Idle" },
+    phase: { late: "Late night", dawn: "Dawn", morning: "Morning", noon: "Midday",
+             afternoon: "Afternoon", evening: "Evening", night: "Night" },
+    lines: {
+      greeting: "Hey! I'm watching you work. Click me, or right-click for the menu.",
+      stepPoop: "Yuck!! Who left this here!! (angrily buries thin air)",
+      tooTired: "Too tired... let me rest a bit.",
+      healthy: "I'm perfectly fine. Save your money.",
+      recovered: "Much better! Thanks, human!",
+      cleaned: n => n ? `Cleaned up ${n} mess${n > 1 ? "es" : ""}. Thank you.` : "The desk is spotless.",
+      switched: name => `Hi, I'm ${name}!`,
+      feed: "Dinner time!!", thanks: "Thank you!",
+      sleep: "Good night... (I'll probably wake up anyway)",
+      goodMorning: "(stretches) Morning! Let's do this.",
+      goodNight: "Getting sleepy... off to bed. See you tomorrow.",
+      zzz: "Zzz...",
+      hungryHint: "(my stomach is rumbling)",
+      careTag: "Just saying",
+      routineTag: "Reminder",
+      awayToast: h => `While you were away for ${h} hours`,
+      heldHigh: "Whoa, I'm flying!",
+      pokeLine: "I'm right here! Stop clicking the icon, I never left.",
+      spawnNew: name => `A new ${name} joined! Hi everyone.`,
+      spawnFull: "No room! Six is the limit.",
+      soc: {
+        who: (n, t) => `${n}: ${t}`,
+        sniff:  ["(sniffs the newcomer)", "Noted. I'll remember your scent."],
+        sniff2: ["(sniffs back)", "Manners."],
+        play:   ["Bet you can't catch me!", "Run run run!", "Race you to the edge!"],
+        play2:  ["Gotcha!", "My turn to chase!", "You're too slow."],
+        nuzzle: ["(bumps heads)", "Your fur's looking good today."],
+        nuzzle2:["(bumps back)", "...Stop it."],
+        quarrel:["You stepped on my tail!", "This patch of floor is mine!", "Could you chew quieter?"],
+        quarrel2:["It was an accident!", "Says who? I was here first!", "Then wear earplugs."],
+        fight:  ["This ends now!", "I've had enough of you!", "Come here. Right now."],
+        fight2: ["Bring it!", "Don't run!", "Try me!"],
+        fightToast: w => `${w} won the fight`,
+        bossLine: name => `${name} runs this desktop. Don't test it.`,
+      },
+      layerToBack: "Dropping behind the desktop — open another window and I'm gone. (Ctrl+Alt+B to call me back)",
+      layerToFront: "Back on top. Can't miss me now.",
+      layerTag: "Layer",
+      climbTag: "Climbing",
+      climbUp: "Whoa — stuck to the ceiling! Holding on!",
+      climbDown: "Easy, easy... this wall is slippery.",
+      climbLanded: "(shakes off a paw) Landed. All good.",
+      grabTag: "Stole it",
+      grabBite: "This pointer is mine now!",
+      grabDrop: "Fine, have it back. Don't be mad.",
+      grabLost: "Took it back. Stingy.",
+      tripOut: "Going for a wander. Back soon.",
+      tripOuts: ["Going for a wander. Back soon.", "Off to get some air.",
+                 "Heard there's food out there. Investigating.", "One lap around the edge, then back."],
+      tripBack: "I'm back! Windy out there.",
+      tripFriend: name => `Met a ${name} on the way and brought them home.`,
+      tripGift: "Brought you something I found out there.",
+      kicked: name => `${name} packed up and left. Didn't even look back.`,
+      kickedTag: "Ran away",
+      kickWarn: "Stop pushing! Push once more and I'm really leaving!",
+      layEgg: name => `...I think we're going to have a baby. (${name})`,
+      eggToast: name => `An egg appeared — a ${name}`,
+      hatch: name => `It hatched! A little ${name}.`,
+      hatchToast: name => `Hatched: ${name}`,
+      courting: "Two adults are getting close. Something is brewing...",
+      growYoung: name => `${name} grew a bit — faster on its feet now.`,
+      growAdult: name => `${name} is grown up! Old enough to date.`,
+      growElder: name => `${name} is getting old. Move gently around it.`,
+      dieOld: name => `${name} fell asleep for good. Peaceful. It became a little star.`,
+      dieWeak: name => `${name} couldn't hold on... take better care next time.`,
+      stageLabel: { baby:"Baby", young:"Young", adult:"Adult", elder:"Elder" },
+      heldHighCat: "(tail poofed) Put. Me. Down.",
+      dropped: "That was fun! Again!",
+      droppedCat: "Hmph. Never do that again.",
+      sickToast: name => `${name} is sick! Right-click → See the vet`,
+      sickSay: name => `${name} · sick! Right-click → vet`,
+      cleanedTag: "Cleaned up +hygiene", cleanFull: "Sparkling clean", envUp: "Environment improved",
+      switchTag: "Species switched", recoveryTag: "Health restored",
+    },
+    actions: { feed: "🍚 Feed", pet: "🤚 Pet", play: "🎾 Play", bath: "🛁 Clean",
+               sleep: "💤 Sleep", clean: "🧹 Clean up mess", vet: "🩺 See the vet",
+               swap: "🐾 Next pet ▸", lang: "🌐 中文 / English" },
+    pool: {},
+    species: {
+      cat: { name: "Cat",
+        pet: ["Purr... yes, right there.", "Hmm. You're an acceptable human.", "(squints) Fine, you may pet me."],
+        play: ["Pounce! Got your hand.", "Again! I'm not done yet."],
+        hungry: ["The bowl is empty. I've stared at you three times.", "Feed me or I'll walk on your keyboard."],
+        sick: ["Not feeling great... call the doctor.", "(curled up) Not moving today."],
+        clean: ["Grooming. Don't look.", "Cleanliness is a cat's dignity."],
+        poop: ["(scratches the air, pretending to bury it)", "Done. You know what I mean."] },
+      dog: { name: "Dog",
+        pet: ["Tail going like a fan!", "You finally touched me!!", "(tilts head) Again! Again!"],
+        play: ["Ball?! Where's the ball?!", "Running at full speed!!"],
+        hungry: ["Bowl! Empty! Do you see it!", "(drops bowl at your feet)"],
+        sick: ["(lying flat) Human...", "My nose is dry. Not good."],
+        clean: ["Bath time! Splash!", "I smell like shampoo now."],
+        poop: ["(spins three times first, obviously)", "All done! Walk time?"] },
+      rabbit: { name: "Rabbit",
+        pet: ["(nose twitching) ...keep going.", "Soft. Very soft.", "(flops over) Okay, that's nice."],
+        play: ["Hop! Hop! Hop!", "(zoomies across the desk)"],
+        hungry: ["Snack? Snack? Snack?", "(chews the corner of your notebook)"],
+        sick: ["(very still, ears down)", "I don't want to hop today."],
+        clean: ["(licks paw, washes face)", "Fluffy and proud."],
+        poop: ["(tiny pellets, surprisingly tidy)", "Nothing to see here."] },
+      snake: { name: "Snake",
+        pet: ["Warm. Acceptable.", "(slow blink) Continue.", "Your hand is a good heater."],
+        play: ["(slides through your fingers)", "Ssss.... fun."],
+        hungry: ["It has been a while.", "(stares at the mouse-shaped toy)"],
+        sick: ["Cold. Too cold.", "(doesn't lift its head)"],
+        clean: ["Shedding season. Look away.", "New skin, new me."],
+        poop: ["...not going to comment.", "(it happens, rarely)"] },
+      spider: { name: "Spider",
+        pet: ["Eight legs approve.", "(taps twice) Nice rhythm.", "Gentle. Good."],
+        play: ["(dangles on one thread)", "Wheee. Wheee."],
+        hungry: ["Cricket o'clock.", "(waits patiently, which is worse)"],
+        sick: ["(curled slightly)", "Too still. Something's wrong."],
+        clean: ["(grooms each leg carefully)", "Tidy web, tidy mind."],
+        poop: ["Tiny. Invisible. Move on.", "(nothing happened, trust me)"] },
+      chicken: { name: "Chicken",
+        pet: ["Bok bok!", "(sits down) Yes, there.", "Cluck of approval."],
+        play: ["(chases a crumb at full speed)", "Scratch scratch scratch!"],
+        hungry: ["Feed! Feed! FEED!", "(pecks the empty bowl)"],
+        sick: ["(fluffed up, quiet)", "No clucking today."],
+        clean: ["Dust bath! Excellent!", "(shakes every feather)"],
+        poop: ["...", "(it's everywhere, sorry)"] },
+      duck: { name: "Duck",
+        pet: ["Quack.", "(leans into your hand)", "Quack quack."],
+        play: ["(waddles in a circle)", "Water? Water?"],
+        hungry: ["Bread? No? Bread?", "(follows you everywhere)"],
+        sick: ["(sits down, quiet)", "Quack... (weak)"],
+        clean: ["Splash! Splash! Splash!", "(water everywhere, as usual)"],
+        poop: ["Quack. (you know)", "(waddle away innocently)"] },
+    },
+  },
+};
+
+// 中文台词直接复用页面原有 SPECIES 里写好的中文，避免两份维护
+Object.keys(SPECIES).forEach(k => {
+  const s = SPECIES[k];
+  I18N.zh.species[k] = { name: s.name, pet: s.petLines, play: s.playLines, hungry: s.hungryLines,
+                         sick: s.sickLines, clean: s.cleanLines, poop: s.poopLines };
+});
+
+const T = () => I18N[LANG] || I18N.zh;                       // 当前语言包
+function sp(){ return T().species[cur] || SPECIES[cur]; }     // 当前物种的本地化数据
+function spName(){ return sp().name || SPECIES[cur].name; }
+function spLine(kind){
+  const arr = sp()[kind] || SPECIES[cur][kind + "Lines"] || ["…"];
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// ---------------- 时间感 / 纪念日 / 贴心关怀 ----------------
+let USAGE = [];                       // 壳层推送的今日前台应用时长 [{n,s}]
+window.__usage = list => { USAGE = list || []; };
+
+function daysSinceInstall(){
+  const t = window.petHubInstalledAt || 0;
+  if(!t) return 0;
+  return Math.max(1, Math.floor((Date.now() - t) / 86400000) + 1);
+}
+const APP_CN = { Code:"VS Code", code:"VS Code", devenv:"Visual Studio", chrome:"Chrome",
+  msedge:"Edge", WeChat:"微信", Weixin:"微信", QQ:"QQ", EXCEL:"Excel", WINWORD:"Word",
+  POWERPNT:"PPT", Qoder:"Qoder", WorkBuddy:"WorkBuddy", idea:"IDEA", pycharm:"PyCharm",
+  Doubao:"豆包", ChatGPT:"ChatGPT", wps:"WPS", explorer:"资源管理器" };
+function appName(n){ return APP_CN[n] || n; }
+
+// 好玩的"报时"：按日期/星期/时段各来一句，且带安装天数
+function timeLine(){
+  const d = new Date(), L = T();
+  const hh = d.getHours(), wd = d.getDay();
+  const md = LANG === "en" ? `${d.getMonth()+1}/${d.getDate()}` : `${d.getMonth()+1}月${d.getDate()}日`;
+  const dayN = daysSinceInstall();
+  const WD = LANG === "en"
+    ? ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][wd]
+    : ["周日","周一","周二","周三","周四","周五","周六"][wd];
+  const zh = LANG !== "en";
+  let s;
+  if(zh){
+    if(hh >= 23 || hh < 5) s = "都这么晚了，你还不睡？我陪是陪，但明天会困的。";
+    else if(hh < 8)  s = "这么早就开工，你是不是没睡醒？";
+    else if(hh >= 11 && hh < 13) s = "午饭时间到了，先吃饭再卷。";
+    else if(hh >= 17 && hh < 19) s = "下班档口，今天的任务收尾了吗？";
+    else if(wd === 5 && hh >= 18) s = "周五晚上！该松口气了。";
+    else if(wd === 1 && hh < 11) s = "周一早上，我先替你叹口气。";
+    else if(wd === 0 || wd === 6) s = "周末还在忙？那你比我还拼。";
+    else s = "又是搬砖的一天，我在旁边看着。";
+    if(d.getDate() === 1) s = "本月第一天，新的开始哦。";
+  } else {
+    if(hh >= 23 || hh < 5) s = "It's late. I'll stay, but you'll be tired tomorrow.";
+    else if(hh < 8)  s = "Up this early? You look half asleep.";
+    else if(hh >= 11 && hh < 13) s = "Lunch time. Eat first, grind later.";
+    else if(hh >= 17 && hh < 19) s = "Wrapping up for the day?";
+    else if(wd === 5 && hh >= 18) s = "Friday night! Time to breathe.";
+    else if(wd === 1 && hh < 11) s = "Monday morning. I sighed for you.";
+    else if(wd === 0 || wd === 6) s = "Working on a weekend? You outdo me.";
+    else s = "Another day of work. I'm right here.";
+    if(d.getDate() === 1) s = "First day of the month. Fresh start.";
+  }
+  if(dayN === 7 || dayN === 30 || dayN === 100 || dayN === 365)
+    s += zh ? ` 今天是我们在一起的第 ${dayN} 天！` : ` It's our day ${dayN} together!`;
+  return `${md} · ${WD} · ${hh}:00 — ${s}`;
+}
+
+// 贴心关怀：看今天哪个应用盯太久
+let lastCareLine = 0, lastHour = new Date().getHours();
+function careLine(){
+  if(!USAGE.length) return null;
+  const top = USAGE[0];
+  if(!top) return null;
+  const min = Math.round(top.s / 60), app = appName(top.n);
+  const zh = LANG !== "en";
+  if(min >= 180) return zh
+    ? `${app} 已经开了 ${Math.floor(min/60)} 小时了……你今天真的辛苦了，去喝口水吧。`
+    : `${app} has been open for ${Math.floor(min/60)} hours. You've earned a water break.`;
+  if(min >= 90) return zh
+    ? `你盯着 ${app} ${min} 分钟了，眼睛不酸吗？眨眨眼，看看远处。`
+    : `${min} minutes on ${app}. Look away for 20 seconds, will you?`;
+  if(min >= 45 && new Date().getHours() >= 22) return zh
+    ? `都 ${new Date().getHours()} 点了还在 ${app}，明天再战吧。`
+    : `Still on ${app} at this hour. Save some for tomorrow.`;
+  return null;
+}
+
+// ---------------- 宠物之间的八卦：一来一回，像真的在唠嗑 ----------------
+// 每组台词轮流由两只说：第 0、2、4 句是左边的，第 1、3 句是右边的。
+const GOSSIP_TXT = {
+  zh: [
+    ["你听说了吗？楼下那只猫又胖了一圈。", "嘘——它就在楼下，别让它听见。"],
+    ["我给你讲个笑话：为什么程序员分不清万圣节和圣诞节？", "因为 Oct 31 等于 Dec 25。"],
+    ["我今天看见主人对着屏幕叹了口气。", "他一天要叹八十次，我都数着呢。"],
+    ["你说我们为什么要在屏幕上走来走去？", "因为不动的话，主人会以为我们卡了。"],
+    ["我刚才在任务栏上摔了一跤。", "那叫下台阶，不叫摔。"],
+    ["你猜主人现在在想什么？", "在想「这鼠标怎么又没电了」。"],
+    ["听说隔壁那只狗会握手。", "我也会——只是我不想。"],
+    ["今天天气怎么样？", "屏幕里永远是晴天，只有弹窗会下雨。"],
+    ["你觉得我们俩谁比较可爱？", "这个问题问得好。答案不重要，反正不是你。"],
+    ["我昨天梦见自己变成了一只真的猫。", "然后呢？", "然后我醒了，还在这个桌面上。"],
+    ["主人今天又点外卖了。", "第几次了？", "这周第四次，我记着呢。"],
+    ["别踩我尾巴。", "我没踩，是地板先动的手。"],
+    ["你说等主人下班了我们干嘛？", "继续在这儿走来走去，等他明天回来。"],
+    ["我刚数了一下，桌面上有 37 个图标。", "你居然真数？", "嗯，数到 12 就重来过三回。"],
+    ["你怕不怕被关掉？", "怕什么，反正主人一开机我们就回来了。"],
+  ],
+  en: [
+    ["Did you hear? The cat downstairs got even rounder.", "Shh — it's right downstairs. Don't let it hear."],
+    ["Why can't programmers tell Halloween from Christmas?", "Because Oct 31 equals Dec 25."],
+    ["I saw the human sigh at the screen today.", "Eighty times a day. I count."],
+    ["Why do we keep walking around the screen?", "Because if we stop, the human thinks we crashed."],
+    ["I tripped on the taskbar earlier.", "That's called a step. Not a trip."],
+    ["What do you think the human is thinking right now?", "\"Why is this mouse out of battery again.\""],
+    ["I heard the dog next door can shake hands.", "So can I. I just don't want to."],
+    ["How's the weather today?", "Always sunny in here. Only pop-ups rain."],
+    ["Who's cuter, you or me?", "Great question. The answer doesn't matter. It's not you."],
+    ["I dreamed I was a real cat last night.", "And then?", "Then I woke up. Still this desktop."],
+    ["The human ordered takeout again.", "How many times now?", "Fourth this week. I'm keeping score."],
+    ["Don't step on my tail.", "I didn't. The floor started it."],
+    ["What do we do when the human logs off?", "Keep walking around. Wait for tomorrow."],
+    ["I counted 37 icons on the desktop.", "You actually counted?", "Mm. Had to restart at twelve, three times."],
+    ["Aren't you scared of being closed?", "Why? Reboot and we're right back."],
+  ],
+};
+
+// ---------------- 一天的"人味儿"：固定作息提醒 + 随机碎碎念 ----------------
+// 每条一天只触发一次；触发窗口 4 分钟，电脑休眠错过了也不补（补了反而奇怪）
+const ROUTINE = [
+  { k:"nine",   h: 9, m:20 },
+  { k:"water1", h:10, m:20 },
+  { k:"lunch",  h:11, m: 0 },
+  { k:"meal",   h:12, m:10 },
+  { k:"slack",  h:14, m:20 },
+  { k:"water2", h:15, m:30 },
+  { k:"snack",  h:16, m:10 },
+  { k:"wrap",   h:17, m:40 },
+  { k:"off",    h:18, m:10 },
+  { k:"water3", h:20, m: 0 },
+  { k:"sleep",  h:22, m:40 },
+];
+const ROUTINE_TXT = {
+  zh: {
+    nine:  "九点二十，先啃掉今天最硬的那块骨头，剩下的都会变简单。",
+    water1:"十点二十啦，喝口水。别等嗓子冒烟才想起来。",
+    lunch: "十一点了主人！该订饭了，再晚就只能吃别人挑剩的。",
+    meal:  "饭到了没？先吃，凉了就白瞎了。",
+    slack: "下午两点半，人最蔫的时候。去接杯水，顺便摸五分钟鱼，我不告状。",
+    water2:"三点半，第二杯水。站起来扭扭腰，你的脊椎会谢我。",
+    snack: "四点十分，馋了吧？抽屉里是不是藏了零食。",
+    wrap:  "五点四十了，别接新活儿，收了收了。",
+    off:   "六点十分，下班。关掉这个窗口，我数三个数。",
+    water3:"八点了还在忙？喝口水，顺便看看窗外有没有月亮。",
+    sleep: "快十一点了。真的，睡吧，明天我还在。",
+  },
+  en: {
+    nine:  "9:20. Take the hardest thing first — the rest gets easier.",
+    water1:"10:20. Drink some water — don't wait until your throat is dry.",
+    lunch: "It's 11! Order lunch now, or you get the leftovers.",
+    meal:  "Food arrived? Eat while it's hot.",
+    slack: "2:20pm, the dead zone. Grab a water, slack off for five minutes. I won't tell.",
+    water2:"3:30. Second glass. Stand up and stretch — your spine will thank me.",
+    snack: "4:10. Craving something? You hid snacks in that drawer, didn't you.",
+    wrap:  "5:40. Stop taking new work. Wrap it up.",
+    off:   "6:10. Clock out. Close this window. I'm counting to three.",
+    water3:"8pm and still going? Water. And check if the moon is out.",
+    sleep: "Almost 11. Really — sleep. I'll be here tomorrow.",
+  },
+};
+const CHATTER_TXT = {
+  zh: ["我在想，如果我是真的鸡，会不会已经被炖汤了。",
+       "刚才有只苍蝇落在屏幕上，我扑了个空。",
+       "你打字的时候我一直看着，别以为我不知道你在摸鱼。",
+       "（原地转了一圈）这样算运动吗？",
+       "偷偷告诉你：进度条不动的时候，我也在等。",
+       "你今天敲键盘的次数，比我眨眼的次数还多。",
+       "（叼来一片不存在的叶子）送你的。",
+       "如果我突然消失，一定是去追那个光标了。",
+       "我数了数，你今天说了 47 次「马上就好」。",
+       "别皱眉，皱纹会留在脸上的。"],
+  en: ["I wonder... if I were a real chicken, would I be soup by now?",
+       "There was a fly on the screen. I missed it.",
+       "I watch you type. Yes, I know you're slacking.",
+       "(spins in place) Does this count as exercise?",
+       "Secret: when the progress bar stops, I'm waiting too.",
+       "You've hit more keys today than I've blinked.",
+       "(brings you an imaginary leaf) For you.",
+       "If I vanish, I went after the cursor.",
+       "I counted: you said 'almost done' 47 times today.",
+       "Don't frown. It'll stick to your face."],
+};
+
+let routineDay = -1, firedRoutine = {}, nextChatter = Date.now() + (4 + Math.random()*5) * 60000;
+
+function routineDue(){
+  const d = new Date(), hh = d.getHours(), mm = d.getMinutes(), day = d.getDate();
+  if(routineDay !== day){ routineDay = day; firedRoutine = {}; }     // 跨天重置
+  for(const r of ROUTINE){
+    if(hh !== r.h || mm < r.m || mm > r.m + 3) continue;
+    if(firedRoutine[r.k]) continue;
+    firedRoutine[r.k] = 1;
+    const txt = (ROUTINE_TXT[LANG] || ROUTINE_TXT.zh)[r.k];
+    if(txt && !sick){                                   // 生病时先惦记身体，别念日程
+      say(txt, T().lines.routineTag);
+      behavior = {kind:"play", until: now() + 2.5};
+    }
+    return;
+  }
+}
+function maybeChat(){
+  if(Date.now() < nextChatter) return;
+  nextChatter = Date.now() + (6 + Math.random()*9) * 60000;
+  if(behavior.kind === "sleep" || sick) return;
+  const arr = CHATTER_TXT[LANG] || CHATTER_TXT.zh;
+  say(arr[Math.floor(Math.random()*arr.length)], spName());
+}
+
+// ---------------- 离线记忆：关机那段时间它真的"自己过了一夜" ----------------
+let awayInfo = null;                  // 本次启动时的离线结算结果
+function clamp100(v){ return Math.max(0, Math.min(100, v)); }
+
+function applyAway(saved){
+  if(!saved || !saved.ts) return;
+  const hours = Math.min(12, (Date.now() - saved.ts) / 3600000);   // 最多结算 12 小时，绝不"饿死"
+  if(hours < 0.05) return;                                          // 3 分钟内不算离开
+  let dS = 0, dM = 0;
+  pets.forEach(p => {                                               // 每一只都过了一夜
+    const st = p.st;
+    const s0 = st.satiety, m0 = st.mood;
+    st.satiety = clamp100(st.satiety - hours * 4.2);
+    st.energy  = clamp100(st.energy  + hours * 3.5);
+    st.hygiene = clamp100(st.hygiene - hours * 1.6);
+    st.mood    = clamp100(st.mood    - hours * 2.2 - (st.satiety < 30 ? 6 : 0));
+    if(st.satiety < 10) st.health = clamp100(st.health - hours * 1.0);
+    dS = Math.max(dS, s0 - st.satiety); dM = Math.max(dM, m0 - st.mood);
+  });
+  const n = Math.min(5, Math.floor(hours / 2.2));                   // 攒下的排泄物
+  for(let i = 0; i < n; i++)
+    poops.push({ x: Math.max(80, Math.min((W||1200) - 80, 120 + Math.random()*((W||1200) - 240))),
+                 t: Date.now(), sp: (pets[i % pets.length] || {}).sp });
+  awayInfo = { hours, dS:Math.round(dS), dM:Math.round(dM), poops:n };
+  if(pets.length) bindActive(activeIdx);
+}
+
+// 回家台词：按离开时长分档，越久越委屈
+function awayGreeting(){
+  const L = T().lines;
+  if(!awayInfo) return L.greeting;
+  const h = awayInfo.hours;
+  const Hun = T().hungryHint;
+  let s;
+  if(LANG === "en"){
+    if(h < 1)  s = "Where did you just go? I waited right here.";
+    else if(h < 4) s = "You were gone a while... I got bored.";
+    else if(h < 8) s = "Hours without you. I started counting floor tiles.";
+    else s = "A whole night with no human! I'm hungry... and I missed you.";
+    if(ST.satiety < 30) s += " " + Hun;
+  } else {
+    if(h < 1)  s = "你刚去哪儿了？我就在这儿等你呢。";
+    else if(h < 4) s = "你走了好一阵……我有点无聊了。";
+    else if(h < 8) s = "好几个小时不见你，我都开始数地砖了。";
+    else s = "一整晚都不见人！我饿了，也想你了。";
+    if(ST.satiety < 30) s += "（肚子在叫）";
+  }
+  return s;
+}
+
+// 主动存盘：页面关闭前 + 每分钟一次
+function saveState(){
+  try {
+    if(window.petHub && window.petHub.saveState)
+      window.petHub.saveState(JSON.stringify({
+        ver: 2, ts: Date.now(),
+        pets: pets.map(p => ({ id:p.id, sp:p.sp, x:p.x, dir:p.dir, born:p.born,
+                              st:p.st, sick:p.sick, sickSince:p.sickSince, temper:p.temper })),
+        eggs: eggs, grave: graveyard.slice(-20),
+        rel: Array.from(relMap.entries()),            // 谁跟谁关系怎么样，也要记住
+      }));
+  } catch(e){}
+}
+addEventListener("beforeunload", saveState);
+
+// ---------------- 养宠物的一天（时段 → 作息/代谢） ----------------
+// 只做 O(1) 计算，每秒一次，对性能无感
+function dayPhase(){
+  const h = new Date().getHours();
+  if(h <  6) return { key:"late",      sleep:.85, energy:+1.6, mood:-0.02, act:.35, food:.55 };
+  if(h <  9) return { key:"dawn",      sleep:.10, energy:+0.6, mood:+0.05, act:1.00, food:1.25 };
+  if(h < 12) return { key:"morning",   sleep:.05, energy:-0.2, mood:+0.03, act:1.25, food:1.15 };
+  if(h < 14) return { key:"noon",      sleep:.30, energy:+0.4, mood: 0.00, act:0.80, food:1.00 };
+  if(h < 18) return { key:"afternoon", sleep:.08, energy:-0.2, mood:+0.02, act:1.15, food:1.00 };
+  if(h < 22) return { key:"evening",   sleep:.05, energy:-0.3, mood:+0.04, act:1.30, food:1.10 };
+  return           { key:"night",   sleep:.45, energy:+0.8, mood:-0.02, act:0.60, food:0.70 };
+}
+let greetDay = -1, greetedM = false, greetedN = false;   // 每天只说一次早晚安
+
+// ---------------- 自然语态生成 ----------------
+// 把 {platform,status,title,message} 翻译成"人话"，同一状态多套说法轮换
+const PLAT_LABEL = {"workbuddy":"WorkBuddy","qoder":"Qoder","claude code":"Claude Code",
+  "claudecode":"Claude Code","codex":"Codex","cursor":"Cursor","copilot":"Copilot",
+  "unknown":"未知平台","桌面观察":"桌面观察"};
+function platName(p){
+  const k = String(p||"").trim();
+  return PLAT_LABEL[k.toLowerCase()] || k;
+}
+
+// 这类标题是"没有信息量"的占位（会话 main / session xxx），不值得念出来
+function subjectOf(t){
+  const s = String(t.title||"").trim();
+  if(!s) return "";
+  if(/^(会话\s*\w*|session\s*\w*|main|task|未命名任务)$/i.test(s)) return "";
+  if(/会话$/.test(s) && s.length <= 10) return "";
+  return s.length > 12 ? s.slice(0,12) + "…" : s;
+}
+
+// "在等你" 还是 "在问你"：授权/询问/选择 都算提问
+const ASK_RE = /授权|询问|permission|approve|confirm|确认|consent|是否|要不要|可以吗|行吗|y\/n|yes\s*or\s*no|AskUserQuestion|ExitPlanMode|批准|选择|拍板|建议/i;
+function flavorOf(t){
+  if(t.status === "waiting"){
+    if(t.ask) return "ask";
+    if(ASK_RE.test(String(t.message||"") + " " + String(t.title||""))) return "ask";
+    return "waiting";
+  }
+  // 平台只报"运行中"，但很久没有新事件 → 推断它停住了（不敢断言是在问你）
+  if((t.status === "running" || t.status === "thinking")
+     && (Date.now()/1000 - (t.ts||0)) > 100) return "idle";
+  return t.status || "running";
+}
+
+I18N.zh.pool = {
+  running: [
+    "{P} 正在忙你交代的{S}活儿",
+    "你交给 {P} 的{S}活儿还在推进",
+    "{P} 埋头苦干中{S}，别催～",
+    "{P} 还在跑{S}，快出结果了",
+    "{P} 正在处理{S}这件事，稍等一下",
+    "{P} 手上的{S}活儿没停",
+  ],
+  thinking: [
+    "{P} 正在琢磨怎么回你{S}",
+    "{P} 想了一会儿{S}，还没落笔",
+    "{P} 在琢磨{S}该怎么办",
+    "{P} 正在盘算{S}怎么下手",
+  ],
+  done: [
+    "{P} 把你交代的{S}活儿干完了",
+    "交给 {P} 的{S}任务完成啦",
+    "{P} 收工了{S}，去看看结果",
+    "{P} 那边{S}搞定了",
+    "你交给 {P} 的{S}事有结果了",
+    "{P} 干得漂亮{S}，活儿成了",
+  ],
+  waiting: [
+    "{P} 停下来了{S}，在等你",
+    "{P} 卡在{S}这儿了，等你一句话",
+    "{P} 那边暂停{S}，快去瞅瞅",
+    "{P} 杵着不动{S}，像是等你",
+  ],
+  ask: [
+    "{P} 想问你一句{S}：这么做行吗？",
+    "{P} 在等你授权{S}，去点个确认",
+    "{P} 拿不定主意{S}，等你拍板",
+    "{P} 举手提问{S}：要不要继续？",
+    "{P} 停在那儿问你{S}：可以吗？",
+    "{P} 有个{S}选择要你定夺",
+  ],
+  // 注意：这里只陈述"多久没消息"这个客观事实，绝不推断"是不是在等你"
+  idle: [
+    "{P} 已经{M}分钟没有新消息了",
+    "{P} 静悄悄{M}分钟了{S}",
+    "{P} 有{M}分钟没动静{S}",
+  ],
+  error: [
+    "{P} 那边{S}出岔子了",
+    "{P} 报错了{S}，可能要你出手",
+    "{P} 摔了一跤{S}，去看看？",
+    "你交给 {P} 的{S}活儿卡壳了",
+  ],
+};
+
+I18N.en.pool = {
+  running: [
+    "{P} is hard at work on the {S}task you gave it",
+    "The {S}job you handed {P} is still going",
+    "{P} is grinding away{S}, don't rush it",
+    "{P} is still running{S}, nearly there",
+    "{P} is handling {S}right now, hang on",
+    "The {S}work in {P}'s hands hasn't stopped",
+  ],
+  thinking: [
+    "{P} is thinking about how to answer{S}",
+    "{P} paused for a moment{S}, nothing typed yet",
+    "{P} is figuring out what to do about {S}",
+    "{P} is planning its next move{S}",
+  ],
+  done: [
+    "{P} finished the {S}work you asked for",
+    "The {S}task you gave {P} is done",
+    "{P} is off the clock{S}, go check the result",
+    "{P} wrapped it up{S}",
+    "There's a result waiting from {P}{S}",
+    "{P} nailed it{S}, job's done",
+  ],
+  waiting: [
+    "{P} has stopped{S} and is waiting for you",
+    "{P} is stuck on {S}, waiting for your call",
+    "{P} paused over there{S}, go take a look",
+    "{P} isn't moving{S}, looks like it's waiting for you",
+  ],
+  ask: [
+    "{P} wants to ask you{S}: is this ok?",
+    "{P} is waiting for your approval{S}, go confirm",
+    "{P} can't decide{S}, it needs your call",
+    "{P} raises a hand{S}: should it continue?",
+    "{P} stopped to ask you{S}: may I?",
+    "{P} has a {S}choice for you to make",
+  ],
+  // 只陈述"多久没消息"这个客观事实，绝不推断"是不是在等你"
+  idle: [
+    "{P} has been quiet for {M} minutes",
+    "{P} has gone silent for {M} minutes{S}",
+    "No word from {P} for {M} minutes{S}",
+  ],
+  error: [
+    "{P} ran into trouble{S}",
+    "{P} hit an error{S}, it might need you",
+    "{P} took a tumble{S}, want to look?",
+    "The {S}job you gave {P} is stuck",
+  ],
+};
+
+function hash32(s){
+  let h = 2166136261;
+  for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function fill(tpl, t){
+  const P = platName(t.platform), S = subjectOf(t);
+  const M = Math.max(1, Math.round((Date.now()/1000 - (t.ts||0)) / 60));
+  return tpl.replace("{P}", P).replace("{S}", S ? "「" + S + "」" : "")
+            .replace("{M}", M)
+            .replace(/\s{2,}/g, " ").trim();
+}
+// fresh=true 每次换一种说法（宠物播报）；否则按时间缓慢轮换（HUD，约 45 秒一换）
+function phraseFor(t, fresh){
+  const kind = flavorOf(t);
+  const pool = T().pool[kind] || T().pool.running;
+  const salt = (t.platform||"") + "|" + (t.id||"") + "|" + kind;
+  const idx = fresh ? Math.floor(Math.random()*pool.length)
+                    : (hash32(salt) + Math.floor(Date.now()/45000)) % pool.length;
+  return fill(pool[idx], t);
+}
+function exclaim(s){ return /[？?！!～~]$/.test(s) ? s : s + "！"; }
+
+let hudOpen = {};                   // 平台 -> 是否展开
+let hudHidden = false;
+let bridgeOnline = false;
+let demoTimer = null;
+let doneToday = 0, todayDay = new Date().getDate();
+
+function taskKey(t){ return t.platform + "::" + (t.id || t.title); }
+
+function applySnapshot(snap){
+  TASKS.clear();
+  (snap.tasks || []).forEach(t => TASKS.set(taskKey(t), normalize(t)));
+  renderHUD();
+}
+function normalize(t){
+  return { platform:t.platform||"unknown", id:t.id||"", title:t.title||"未命名任务",
+    status:t.status||"running", progress:(t.progress==null?null:Math.max(0,Math.min(100,+t.progress))),
+    message:t.message||"", ask:!!t.ask, ts:t.ts||Date.now()/1000 };
+}
+
+function onEvent(ev){
+  if(ev.type === "snapshot"){ applySnapshot(ev); return; }
+  if(ev.type === "task"){
+    const t = normalize(ev.task), old = TASKS.get(taskKey(t));
+    TASKS.set(taskKey(t), t);
+    if(old){
+      if(old.status !== "waiting" && t.status === "waiting") announce("waiting", t);
+      if(old.status !== "done" && t.status === "done") announce("done", t);
+      if(old.status !== "error" && t.status === "error") announce("error", t);
+    }
+    renderHUD();
+  }
+  if(ev.type === "removed"){ TASKS.delete(ev.key); renderHUD(); }
+}
+
+// 任务完成/卡住时宠物播报（每次随机换一种说法）
+function announce(kind, t){
+  const p = phraseFor(t, true);
+  if(kind === "done"){
+    ST.mood = Math.min(100, ST.mood + 3);
+    doneToday++;
+    say(exclaim(p));
+    toast(`<b>✅ ${platName(t.platform)}</b> · ${p}`);
+  } else if(kind === "waiting"){
+    const ask = flavorOf(t) === "ask";
+    say(exclaim(p) + (ask ? (LANG === "en" ? " Go click it!" : " 快去点它！")
+                          : (LANG === "en" ? " Go have a look!" : " 去看看吧！")));
+    toast(`<b>${ask ? "🙋" : "⏸️"} ${platName(t.platform)}</b> · ${p}`);
+  } else if(kind === "error"){
+    say(LANG === "en" ? `Uh oh... ${p}, want to take a look?` : `呜……${p}，要看看吗？`);
+    toast(`<b>❌ ${platName(t.platform)}</b> · ${p}`);
+  }
+}
+
+function toast(html){
+  const d = document.createElement("div");
+  d.className = "toast"; d.innerHTML = html;
+  el("toasts").prepend(d);
+  setTimeout(()=>{ d.style.opacity="0"; d.style.transition=".4s"; setTimeout(()=>d.remove(),400); }, 6000);
+}
+
+function groupByPlat(){
+  const g = new Map();
+  TASKS.forEach(t => {
+    if(!g.has(t.platform)) g.set(t.platform, []);
+    g.get(t.platform).push(t);
+  });
+  return g;
+}
+
+function renderHUD(){
+  const g = groupByPlat();
+  const list = el("platList");
+  let total = TASKS.size;
+  const today = new Date().getDate();
+  if(today !== todayDay){ todayDay = today; doneToday = 0; }   // 跨天清零
+  el("hudN").textContent = total
+    ? T().ui.tasks(total) + (doneToday ? " · " + T().ui.today(doneToday) : "") : "";
+  const doneT = Date.now()/1000 - 60;    // 完成/报错 60 秒后从显示中移除
+  [...TASKS].forEach(([k,t]) => {
+    if((t.status==="done"||t.status==="error") && t.ts < doneT) TASKS.delete(k);
+  });
+
+  let html = "";
+  for(const [plat, arr] of g){
+    if(!hudOpen[plat]) hudOpen[plat] = arr.some(t=>t.status==="waiting");
+    const wait = arr.filter(t=>t.status==="waiting").length;
+    const askN = arr.filter(t=>t.status==="waiting" && flavorOf(t)==="ask").length;
+    const waitN = wait - askN;
+    const run  = arr.filter(t=>t.status==="running"||t.status==="thinking").length;
+    // 措辞诚实：只有平台明确说"在问你"才写"等你拍板"，其余只写"等你处理"
+    const SU = T().sum;
+    const sum = [run?SU.busy(run):"", askN?SU.ask(askN):"", waitN?SU.wait(waitN):"",
+                 (arr.length-run-wait)?SU.done(arr.length-run-wait):""]
+      .filter(Boolean).join(" · ") || SU.idle;
+    html += `<div class="plat ${hudOpen[plat]?"open":""}" data-p="${plat}">
+      <div class="plat-head">
+        <div class="plat-dot" style="background:${platColor(plat)}"></div>
+        <div class="plat-name">${platName(plat)}</div>
+        <div class="plat-sum">${sum}</div><div class="plat-arrow">${hudOpen[plat]?"▾":"▸"}</div>
+      </div>
+      <div class="tasks">` +
+      arr.map(t=>{
+        const m = STATUS_META[t.status] || STATUS_META.running;
+        const indet = (t.status==="running"||t.status==="thinking") && t.progress==null;
+        const pct = indet ? "" : (t.progress==null ? (t.status==="done"?"100":"") : Math.round(t.progress)+"%");
+        const width = t.progress!=null ? t.progress : (t.status==="done"?100:(t.status==="error"?100:8));
+        return `<div class="task ${t.status==="waiting"?"task-wait":""} ${t.status==="error"?"task-err":""} ${t.status==="done"?"task-done":""}"
+             data-k="${t.platform}::${t.id}" title="${T().statusLabel[t.status]||""} · ${t.title}${t.message?" · "+t.message:""}">
+          <div class="task-row">
+            <div class="task-ico">${m.ico}</div>
+            <div class="task-title">${phraseFor(t)}</div><div class="task-pct">${pct}</div>
+          </div>
+          <div class="bar ${indet?"indet":""}"><i style="width:${width}%;background:${m.col}"></i></div>
+          ${t.message?`<div class="task-msg">${t.message}</div>`:""}
+        </div>`;
+      }).join("") +
+      `</div></div>`;
+  }
+  list.innerHTML = html || `<div style="padding:10px 12px;font-size:11.5px;color:#7286a3">${T().ui.noTask}</div>`;
+
+  list.querySelectorAll(".plat-head").forEach(h => h.onclick = () => {
+    hudOpen[h.parentElement.dataset.p] = !hudOpen[h.parentElement.dataset.p]; renderHUD();
+  });
+  list.querySelectorAll(".task").forEach(k => k.onclick = () => {
+    const t = TASKS.get(k.dataset.k);
+    if(t){ const p = phraseFor(t, true);
+      say(t.status==="waiting" ? `${exclaim(p)}${LANG==="en"?" Stop poking my face, go click it!":" 点我脸干嘛，去点它！"}`
+        : t.status==="done" ? `${p}`
+        : `${p}${t.message ? " · " + t.message : ""}`); }
+  });
+  reportTasksToShell();
+}
+
+// ---------------- 把任务动态甩给壳层（任务栏托盘靠这个活着） ----------------
+// 为什么由页面推、而不是壳层自己轮询：页面这条 SSE 是零延迟的，
+// 轮询最快也就 3 秒一次。壳层那边还有一路定时兜底，防止页面卡住时托盘僵在旧状态。
+let _taskSig = "";
+function taskSnapshot(){
+  const arr = [];
+  TASKS.forEach(t => arr.push({
+    p: t.platform, k: t.platform + "::" + t.id, t: t.title,
+    s: t.status, g: (t.progress == null ? null : Math.round(t.progress)), m: t.message || ""
+  }));
+  return {
+    tasks: arr,
+    waiting: arr.filter(x => x.s === "waiting").length,
+    running: arr.filter(x => x.s === "running" || x.s === "thinking").length,
+    error:   arr.filter(x => x.s === "error").length,
+    done:    arr.filter(x => x.s === "done").length,
+    bridge:  bridgeOnline
+  };
+}
+function reportTasksToShell(){
+  if(!(window.petHub && window.petHub.tasks)) return;
+  let s;
+  try { s = JSON.stringify(taskSnapshot()); } catch(e){ return; }
+  if(s === _taskSig) return;      // 没变化就不打扰壳层
+  _taskSig = s;
+  try { window.petHub.tasks(s); } catch(e){}
+}
+
+// 供壳层调用：托盘点一下 = 展开/收起任务面板。
+// 必须走 collapseHud/expandHud —— 它们会同步 hudHidden 并强制重算命中区，
+// 直接 toggle class 会让壳层不知道面板尺寸变了，鼠标就点不中。
+window.pethubToggleHud = function(){
+  if(hudHidden) expandHud(); else collapseHud();
+  return hudHidden ? "0" : "1";
+};
+window.pethubHudOpen = function(){ return el("hud").classList.contains("hidden") ? 0 : 1; };
+window.pethubTaskCount = function(){ return TASKS.size; };
+// 托盘菜单里点某个任务 → 让宠物把那一条念出来
+window.pethubSayTask = function(key){
+  const t = TASKS.get(key);
+  if(!t) return 0;
+  const p = phraseFor(t, true);
+  say(t.status === "waiting" ? `${exclaim(p)}${t.message ? " · " + t.message : ""}`
+    : `${p}${t.message ? " · " + t.message : ""}`);
+  return 1;
+};
+// 第一次进任务栏：提醒一句，不然用户根本不知道图标被 Win11 折进 ^ 里了
+window.pethubHintTray = function(){
+  say(LANG === "en"
+    ? "I moved into the tray — check under ^ if you can't see me."
+    : "我住进右下角通知区啦，看不到就点 ^ 把我拖出来～");
+  return 1;
+};
+// 壳层要宠物说句临场的话（比如刚导入了一个应用）
+window.pethubSay = function(text){
+  try { say(String(text).slice(0, 90)); return 1; } catch(e){ return 0; }
+};
+// 壳层切换语言：HUD、气泡、台词、日期格式全部跟着换，不刷新页面
+window.pethubSetLang = function(l){
+  LANG = (l === "en") ? "en" : "zh";
+  window.petHubLang = LANG;
+  try { document.documentElement.lang = LANG === "en" ? "en" : "zh-CN"; } catch(e){}
+  try { renderHUD(); } catch(e){}
+  try { say(LANG === "en" ? "OK — English it is." : "好，说中文。"); } catch(e){}
+  return LANG;
+};
+
+// ---------------- 桥接连接 ----------------
+function connectBridge(){
+  const es = new EventSource("http://127.0.0.1:8765/api/stream");
+  es.addEventListener("snapshot", e => { bridgeOnline = true; stopDemo();
+    el("noteLine").textContent = T().ui.connected;
+    applySnapshot(JSON.parse(e.data)); });
+  es.onmessage = e => { if(!bridgeOnline){ bridgeOnline = true; stopDemo();
+    el("noteLine").textContent = T().ui.connected; }
+    onEvent(JSON.parse(e.data)); };
+  es.onerror = () => {
+    if(bridgeOnline){ bridgeOnline = false; reportTasksToShell(); }   // 桥断了要让托盘立刻知道
+    else bridgeOnline = false;
+  };
+  setTimeout(()=>{ if(!bridgeOnline) startDemo(); }, 2500);
+}
+
+// 内置演示：三个平台模拟
+function startDemo(){
+  if(demoTimer) return;
+  el("noteLine").textContent = T().ui.demo;
+  const mk = (plat,id,title,prog,msg)=>({platform:plat,id,title,status:"running",progress:prog,message:msg,ts:Date.now()/1000});
+  const demo = {
+    "WorkBuddy":[mk("WorkBuddy","w1","整理桌面文件并归档",42,"正在移动 128 个文件"),
+                 mk("WorkBuddy","w2","撰写产品周报",10,"收集本周提交记录") ],
+    "Claude Code":[mk("Claude Code","c1","重构 pet_kernel 状态机",66,"编辑 pet_kernel.py"),
+                   mk("Claude Code","c2","修复 SSE 断线重连",null,"正在思考方案")],
+    "Codex":[mk("Codex","x1","编写连接器 SDK 文档",25,"生成 README 草稿")]
+  };
+  // 已完成任务要显式构造，mk 的第四个参数是进度不是状态
+  demo["WorkBuddy"].push({platform:"WorkBuddy", id:"w3", title:"部署前端更新",
+    status:"done", progress:100, message:"已发布到生产环境", ts:Date.now()/1000});
+  Object.values(demo).flat().forEach(t=>TASKS.set(taskKey(t),t));
+  renderHUD();
+  let tick = 0;
+  demoTimer = setInterval(()=>{
+    tick++;
+    TASKS.forEach(t=>{
+      if(t.platform==="Codex" && t.id==="x1") return;      // 留一个慢任务
+      if(t.status==="running" && t.progress!=null){
+        t.progress = Math.min(100, t.progress + 2 + Math.random()*5);
+        if(t.progress>=100){ t.status = Math.random()<.12 ? "error" : "done";
+          if(t.status==="error") t.message = "权限不足，等待处理";
+          t.ts = Date.now()/1000; announce(t.status==="done"?"done":"error", t); }
+      } else if(t.status==="done" && tick%40===0 && t.progress!=null){
+        t.status="running"; t.progress=5; t.message="新一轮任务"; t.ts=Date.now()/1000;
+      }
+    });
+    // 随机制造一次"等待确认"
+    if(tick===14){
+      const t = TASKS.get("WorkBuddy::w2");
+      if(t && t.status==="running"){ t.status="waiting"; t.message="需要确认：覆盖 3 个同名文件";
+        t.ts=Date.now()/1000; announce("waiting", t); }
+    }
+    if(tick===30){ const t=TASKS.get("WorkBuddy::w2");
+      if(t){ t.status="running"; t.message="确认完成，继续执行"; t.ts=Date.now()/1000; } }
+    TASKS.forEach(t=>{ if((t.status==="done"||t.status==="error") && Date.now()/1000 - t.ts > 60) TASKS.delete(taskKey(t)); });
+    renderHUD();
+  }, 900);
+}
+function stopDemo(){ if(demoTimer){ clearInterval(demoTimer); demoTimer=null; } }
+
+// ---------------- 状态层（多只宠物 + 生命周期） ----------------
+/* 一只宠物 = 一个对象。所有"当前操作的那只"通过 bindActive(i) 投影到一排老变量上，
+   这样绘制/交互/动作仍可以沿用单只时代的写法，而每只宠物各自保留自己的状态。 */
+const MAX_PETS = 6;
+
+// 生命周期：孵出 → 幼崽 → 少年 → 成年 → 老年 → 寿终（真实时长，单位：分钟）
+const LIFE = {
+  hatch:  0.5,    // 蛋 → 幼崽
+  baby:   25,     // 幼崽期
+  young:  90,     // 少年期
+  adult:  600,    // 成年期（能生崽）
+  elder:  240,    // 老年期
+  // 成年 + 老年之后自然寿终：总计约 16 小时
+};
+const STAGE_SCALE = { baby:0.52, young:0.74, adult:1, elder:0.94 };
+// 天生脾气（会在此基础上随机漂移）
+const TEMPER_BASE = { cat:.55, dog:.35, rabbit:.22, snake:.45, spider:.5, chicken:.78, duck:.4 };
+
+let pets = [];                 // 活的宠物
+let eggs = [];                 // {x, sp, bornAt, hatchAt, parents}
+let graveyard = [];            // 已经离开的（留个纪念，不显示）
+let activeIdx = 0;
+
+// —— 以下这排变量是"当前宠物"的投影，老代码全部依赖它们 ——
+let ST = { satiety:72, energy:80, mood:75, hygiene:88, health:100 };
+let sick = false, sickSince = 0;
+let poops = [];                      // {x, y}
+let poopCooldown = 0;                // 秒，喂食后倒计时
+let behavior = {kind:"idle", until:0};
+let px = 0.5, dir = 1, petSize = 1.0;
+let petLift = 0;                     // 被拎起的高度
+let petAir = 0;                      // 腾空高度：鸡/鸭会飞，兔子会蹦
+const CAN_FLY = { chicken:1, duck:1 };
+const CAN_HOP = { rabbit:1, cat:1, dog:1 };
+let draggingPet = false;
+let dragCleanup = null;        // 收尾函数：防止一次没收到 mouseup 就永久卡住 / 挂上第二套监听
+let dragWho = null;            // 正在被拖的那只（id）——拖拽时位置以鼠标为准
+let kickWarned = false;        // 这只已经警告过"再推就走了"
+
+function newPet(sp, x){
+  const now = Date.now();
+  return {
+    id: "p" + now.toString(36) + Math.floor(Math.random()*1000).toString(36),
+    sp, x: (x==null ? 0.2 + Math.random()*0.6 : x),
+    y: 1, ty: 1,                                 // 高度：1 = 地面，0 = 屏幕最上面
+    dir: Math.random() < .5 ? -1 : 1,
+    lift: 0, air: 0,
+    beh: { kind:"idle", until:0 },
+    born: now,
+    st: { satiety:78, energy:82, mood:78, hygiene:90, health:100 },
+    sick:false, sickSince:0, poopCd: 60 + Math.random()*40,
+    // 脾气：0 温顺 … 1 火药桶。物种底色 + 个体随机
+    temper: Math.min(1, Math.max(0, (TEMPER_BASE[sp] || .5) * .6 + Math.random() * .6)),
+    soc: null,                                   // 正在进行的互动 {kind,with,until,tx}
+    lastTick: now,
+  };
+}
+function petAgeMin(p){ return (Date.now() - p.born) / 60000; }
+function petStage(p){
+  const a = petAgeMin(p);
+  if(a < LIFE.baby)  return "baby";
+  if(a < LIFE.baby + LIFE.young) return "young";
+  if(a < LIFE.baby + LIFE.young + LIFE.adult) return "adult";
+  return "elder";
+}
+function petLifespan(){ return LIFE.baby + LIFE.young + LIFE.adult + LIFE.elder; }   // 分钟
+function isAdult(p){ const s = petStage(p); return s === "adult"; }
+
+function bindActive(i){
+  if(!pets.length) return false;
+  activeIdx = Math.max(0, Math.min(pets.length - 1, i));
+  const p = pets[activeIdx];
+  cur = p.sp;
+  ST = p.st;                        // 直接引用，改 ST 就是改这只宠物
+  behavior = p.beh;
+  // 正在被鼠标拎着的那只：位置由鼠标写在 p.x / p.lift 上（drag 的 place() 每次移动都更新），
+  // 这里必须照样同步过来。以前这里图省事直接跳过，结果画第 2、3 只时 px/petLift 还留着
+  // 上一只宠物的值，被拖的那只会被画到前一只的位置上（看起来就是"一按就消失"），
+  // 松手后 draggingPet 归 false、重新同步，它才"又冒出来"。
+  if(draggingPet && dragWho === p.id){
+    px = p.x; petLift = p.lift; dir = p.dir; petAir = 0;
+  } else {
+    px = p.x; dir = p.dir; petLift = p.lift; petAir = p.air;
+  }
+  sick = p.sick; sickSince = p.sickSince; poopCooldown = p.poopCd;
+  return true;
+}
+function flushActive(){
+  if(!pets.length) return;
+  const p = pets[activeIdx];
+  p.beh = behavior;
+  p.x = px; p.dir = dir; p.lift = petLift; p.air = petAir;
+  p.sick = sick; p.sickSince = sickSince; p.poopCd = poopCooldown;
+}
+// 右键菜单是"延迟执行"的：弹出来以后，主循环每帧还会把每只宠物依次 bindActive 一遍，
+// 等你点下去时 activeIdx 早已漂到数组末尾那只——于是"给第 1 只治病"，会变成第 3 只回答
+// "我很健康，别浪费钱"。菜单必须先记住是针对哪只打开的，执行前把状态切回去。
+let menuPet = null;
+function menuTarget(){
+  if(menuPet && pets.includes(menuPet)){ bindActive(pets.indexOf(menuPet)); return true; }
+  return false;
+}
+let lastPetSay = 0;
+
+const cv = el0("cv"), ctx = cv.getContext("2d");
+let W, H, DPR = 1, petScale = 1;
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio || 1);            // 高分屏清晰度
+  W = innerWidth; H = innerHeight;
+  cv.width  = Math.round(W * DPR);                            // 内部按 DPR 放大
+  cv.height = Math.round(H * DPR);
+  cv.style.width = W + "px"; cv.style.height = H + "px";      // 显示仍为 CSS 像素
+  // 宠物随屏幕尺寸自适应（小屏不挤、大屏不迷你）
+  petScale = Math.max(0.75, Math.min(1.4, Math.min(W / 1600, H / 900)));
+  // HUD 宽度响应式
+  const hw = Math.round(Math.max(240, Math.min(380, W * 0.20)));
+  document.documentElement.style.setProperty("--hud-w", hw + "px");
+}
+addEventListener("resize", resize); resize();
+
+function el0(id){ return document.getElementById(id); }
+function el(id){ return document.getElementById(id); }
+
+const GROUND = () => H - 44;                    // 地面＝任务栏上沿
+const TOP_Y  = () => Math.max(24, H * 0.055);    // 天花板：屏幕最上面那条看不见的边
+// 每只宠物有自己的高度：0 = 屏幕最上面，1 = 地面。
+// 以前所有宠物都被钉在任务栏上，屏幕中间和上半部永远走不到。
+function petYFor(p){ return TOP_Y() + (GROUND() - TOP_Y()) * (p && p.y != null ? p.y : 1); }
+const petX = () => W*px;
+const petY = () => petYFor(pets[activeIdx]) - 8;
+
+// 当前这只的身体缩放：随成长阶段变化（幼崽小，成年标准）
+function stageScale(){
+  const p = pets[activeIdx];
+  if(!p) return 1;
+  return STAGE_SCALE[petStage(p)] || 1;
+}
+
+// 宠物的真实可见包围盒（CSS px）。
+// 关键：命中判定和上报给壳的矩形都用它，而不是固定 190px 方框——
+// 否则点尾巴/耳朵/喙会"穿"到下面的桌面文件上（点宠物结果开了个文件）。
+// 单只宠物的可见包围盒（不依赖"当前宠物"这组全局变量，方便一次算所有宠物）
+function petBoxFor(p){
+  const b = PET_BOX[p.sp] || PET_BOX.cat;
+  const s = 1.25 * petScale * (STAGE_SCALE[petStage(p)] || 1);
+  const x0 = b[0] * s, x1 = b[2] * s, y0 = b[1] * s, y1 = b[3] * s;
+  const cx = W * p.x, base = petYFor(p) - 8 - p.lift - p.air;
+  const left  = cx + (p.dir >= 0 ? x0 : -x1);
+  const right = cx + (p.dir >= 0 ? x1 : -x0);
+  const top   = base + y0;
+  const bottom= base + y1;
+  const padX = 8, padTop = 8, padBottom = 4;   // 轻微留白，比"点不中"好
+  return { left: left - padX, right: right + padX,
+           top: top - padTop, bottom: bottom + padBottom,
+           width: (right - left) + padX*2, height: (bottom - top) + padTop + padBottom };
+}
+function petBox(){
+  const p = pets[activeIdx];
+  return p ? petBoxFor(p) : { left:0, right:0, top:0, bottom:0, width:0, height:0 };
+}
+
+// ---------------- 爬墙：扔到天花板 → 贴着顶边横挪两下 → 顺墙慢慢爬下来 ----------------
+// 以前拖拽最多只能把宠物拎起 280px，永远够不到天花板，"扔到顶上"这件事根本发生不了。
+// 天花板挂点：让头顶刚好贴在屏幕最上沿，而不是半个脑袋被切在屏幕外
+function ceilYFor(p){
+  const b = PET_BOX[p.sp] || PET_BOX.cat;
+  const s = 1.25 * petScale * (STAGE_SCALE[petStage(p)] || 1);
+  const topOff = -b[1] * s + 8;                 // 头顶到"基线"的距离
+  const span = GROUND() - TOP_Y();
+  return Math.max(0, Math.min(.5, (topOff + 8 + 6 - TOP_Y()) / span));
+}
+function headTopOf(p, lift){
+  const b = PET_BOX[p.sp] || PET_BOX.cat;
+  const s = 1.25 * petScale * (STAGE_SCALE[petStage(p)] || 1);
+  return petYFor(p) - 8 - (lift || 0) - (-b[1] * s);
+}
+function startClimb(p){
+  if(!p || p.climb) return;
+  p.climb = { phase:"hang", t0: Date.now(), toY: .58 + Math.random() * .38 };
+  p.y = p.ty = ceilYFor(p);
+  p.lift = 0; p.air = 0;
+  p.beh = { kind:"climb", until: now() + 40 };
+  if(p.soc){                                     // 半路被挂上去，先把话说完的人散开
+    const mate = pets.find(x => x.id === p.soc.with);
+    if(mate){ mate.soc = null; if(mate.beh.kind === "social") mate.beh = { kind:"idle", until: now()+1 }; }
+    p.soc = null;
+  }
+  speakOnce(T().lines.climbUp);
+  reportRects(true);
+}
+function endClimb(p){
+  p.climb = null;
+  p.y = p.ty = Math.min(1, p.y);
+  p.beh = { kind:"idle", until: now() + 2 };
+  speakOnce(T().lines.climbLanded);
+}
+
+// ---------------- 气泡（会跟着宠物走，不会停在原地） ----------------
+let bubbleTimer = null, bubbleW = 200, bubbleH = 60;
+let bubbleFor = null;          // 气泡跟着哪只宠物（互动时说话的不一定是当前这只）
+function placeBubble(){
+  const b = el("bubble");
+  if(!b || !b.classList.contains("show")) return;
+  // 说话的那只不一定是"当前这只"（比如两只宠物互动时），气泡要贴对地方
+  const box = (bubbleFor && pets.includes(bubbleFor)) ? petBoxFor(bubbleFor) : petBox();
+  const cx = (box.left + box.right) / 2;
+  let x = cx + 26;                                  // 默认在宠物右侧
+  if(x + bubbleW > W - 10) x = cx - bubbleW - 26;   // 贴右边就翻到左侧
+  x = Math.max(10, Math.min(W - bubbleW - 10, x));
+  let y = box.top - bubbleH - 8;
+  if(y < 10) y = box.bottom + 8;                    // 头顶放不下就挂脚下
+  y = Math.max(10, Math.min(H - bubbleH - 10, y));
+  b.style.left = x + "px";
+  b.style.top  = y + "px";
+}
+function say(text, from, who){
+  const b = el("bubble");
+  bubbleFor = who || null;
+  b.innerHTML = text + `<span class="from">${from || (spName() + " · " + T().stats.mood + " " + Math.round(ST.mood))}</span>`;
+  b.classList.add("show");
+  bubbleW = Math.min(250, Math.max(120, b.offsetWidth || 200));   // 量一次，之后每帧只挪位置
+  bubbleH = Math.max(34, b.offsetHeight || 60);
+  placeBubble();
+  clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(()=>b.classList.remove("show"), 4200);
+}
+
+// 行为选择（每秒检查）
+function chooseBehavior(){
+  const p = pets[activeIdx];
+  const sp = SPECIES[cur];
+  const ph = dayPhase();
+  if(dragWho && p && p.id === dragWho) return;            // 正被拎在手里，别自己决定去哪儿
+  if(grab && grab.p === p) return;                        // 正叼着指针呢
+  if(p && p.climb) return;                                // 正挂在墙上，别打断
+  if(p && p.soc) return;                                  // 正在跟同伴互动，别打断
+  // 偶尔出门溜达（家里至少留一只陪主人）
+  if(p && !p.trip && pets.filter(q => !q.trip).length >= 2 && Math.random() < .012){
+    startTrip(p); return;
+  }
+  if(sick){ behavior = {kind:"sick", until:now()+3}; return; }
+  if(ST.energy < 22){ if(p) p.ty = 1; behavior = {kind:"sleep", until:now()+8}; return; }
+  // 换高度溜达：飞到半空、爬上半屏、回地面（会飞/会跳的敢上更高）
+  if(p && Math.random() < .22){
+    const rr = Math.random();
+    const dare = (!!CAN_FLY[cur] || !!CAN_HOP[cur]) ? .06 : .24;
+    if(rr < .32)      p.ty = 1;
+    else if(rr < .66) p.ty = .42 + Math.random() * .26;
+    else              p.ty = dare + Math.random() * .18;
+  }
+  // 时段作息：深夜/夜里犯困概率大幅上升（养宠物的一天）
+  if(Math.random() < ph.sleep && ST.energy < 80){ behavior = {kind:"sleep", until:now()+8+Math.random()*6}; return; }
+  if(ST.satiety < 30){ behavior = {kind:"beg", until:now()+4}; return; }
+  if(ST.hygiene < 30 && Math.random()<.5){ behavior = {kind:"groom", until:now()+4}; return; }
+  const r = Math.random();
+  const canFly = !!CAN_FLY[cur], canHop = !!CAN_HOP[cur];
+  // 附近有同伴时，有概率主动凑过去（否则自由散步永远撞不到一起）
+  const mate = nearestMate(pets[activeIdx]);
+  if(mate && mate.d > .04 && mate.d < .22 && r < .34){
+    behavior = { kind:"walk", until:now() + 3 + Math.random()*2 };
+    dir = mate.p.x > px ? 1 : -1;
+    // 顺便降到对方那一层：一个在半空一个在地上，永远搭不上话
+    const myY = p && p.y != null ? p.y : 1, mY = mate.p.y != null ? mate.p.y : 1;
+    if(p && Math.abs(myY - mY) > .12) p.ty = mY;
+    return;
+  }
+  if(canFly && r < .18)       behavior = {kind:"fly",  until:now()+3.5+Math.random()*3};
+  else if(canHop && r < .30)  behavior = {kind:"hop",  until:now()+2.5+Math.random()*2};
+  else if(r < .58)            behavior = {kind:"walk", until:now()+4+Math.random()*4};
+  else if(r < .82)            behavior = {kind:"idle", until:now()+3+Math.random()*3};
+  else                        behavior = {kind:"play", until:now()+3+Math.random()*2};
+}
+const now = () => performance.now()/1000;
+
+// ---------------- 生命周期：长大 / 下崽 / 离开 ----------------
+let breedAt = 0;                     // 两只成年宠物"相处"到这个时刻就下蛋
+let lastStageNote = {};
+function speakOnce(text){            // 多只宠物时不让它们同时抢话
+  if(Date.now() - lastPetSay < 2500) return;
+  lastPetSay = Date.now();
+  say(text);
+}
+function spawnPet(sp, x){
+  if(pets.length >= MAX_PETS) return null;
+  const p = newPet(sp, x);
+  pets.push(p);
+  return p;
+}
+function layEgg(){
+  const adults = pets.filter(isAdult);
+  if(!adults.length) return;
+  const mom = adults[Math.floor(Math.random()*adults.length)];
+  const dad = adults.find(a => a !== mom) || mom;
+  const sp = Math.random() < .5 ? mom.sp : dad.sp;
+  eggs.push({ x: Math.max(.08, Math.min(.92, (mom.x + dad.x)/2)), sp,
+              bornAt: Date.now(), hatchAt: Date.now() + LIFE.hatch*60000 });
+  speakOnce(T().lines.layEgg(spName()));
+  toast(`<b>🥚</b> ${T().lines.eggToast(SPECIES[sp].name || sp)}`);
+}
+function hatchEgg(i){
+  const e = eggs[i];
+  eggs.splice(i, 1);
+  const p = spawnPet(e.sp, e.x);
+  if(!p) return;
+  speakOnce(T().lines.hatch(SPECIES[p.sp].name));
+  toast(`<b>🐣</b> ${T().lines.hatchToast(SPECIES[p.sp].name || p.sp)}`);
+}
+function petDie(p, reason){
+  const idx = pets.indexOf(p);
+  if(idx < 0) return;
+  // 正在互动的那只走了，对方得马上收场，否则会一直傻站着等
+  if(p.soc){
+    const mate = pets.find(x => x.id === p.soc.with);
+    if(mate){
+      mate.soc = null;
+      if(mate.beh.kind === "social") mate.beh = { kind:"idle", until: now() + 1 };
+      mate.st.mood = Math.max(0, mate.st.mood - 6);
+    }
+    p.soc = null;
+  }
+  p.dyingAt = Date.now();
+  pets.splice(idx, 1);
+  graveyard.push({ sp:p.sp, born:p.born, died:Date.now(), reason });
+  for(let k=0;k<7;k++) hearts.push({x: W*p.x + Math.random()*40-20, y: petY()-60, t0: Date.now(), s: Math.random()});
+  if(activeIdx >= pets.length) activeIdx = Math.max(0, pets.length-1);
+  if(pets.length) bindActive(activeIdx);
+  sayOnce(reason === "old" ? T().lines.dieOld(SPECIES[p.sp].name || p.sp)
+                           : T().lines.dieWeak(SPECIES[p.sp].name || p.sp));
+}
+function sayOnce(t){ say(t); }
+function maybeBreed(){
+  if(pets.length + eggs.length >= MAX_PETS) { breedAt = 0; return; }
+  const adults = pets.filter(isAdult);
+  const ready = adults.length >= 2 && adults.filter(a => a.st.mood >= 70).length >= 2;
+  if(!ready){ breedAt = 0; return; }
+  if(!breedAt){
+    breedAt = Date.now() + 120000;                       // 相处两分钟后才下蛋
+    speakOnce(T().lines.courting());
+    return;
+  }
+  if(Date.now() >= breedAt){ breedAt = 0; layEgg(); }
+}
+
+// ---------------- 宠物之间的互动：闻一闻 / 一起玩 / 蹭头 / 吵架 / 打架 ----------------
+// 关系按「id 对」累积：-100 是仇人，+100 是好到穿一条裤子。
+// 决定一次互动走向的是三者：关系值、双方脾气、是不是刚出生的小崽。
+const relMap = new Map();
+let nextSocAt = 0;                                   // 全局冷却：不让整屏宠物一起开打
+const SOC_ICON = { sniff:"👃", play:"🎵", nuzzle:"❤️", quarrel:"💢", fight:"💥", chat:"💬" };
+const SOC_DUR  = { sniff:3.2, play:8, nuzzle:5, quarrel:7, fight:6, chat:11 };
+
+function relKey(a,b){ return a.id < b.id ? a.id + "|" + b.id : b.id + "|" + a.id; }
+function getRel(a,b){ const v = relMap.get(relKey(a,b)); return v == null ? 0 : v; }
+function bumpRel(a,b,d){
+  const k = relKey(a,b);
+  relMap.set(k, Math.max(-100, Math.min(100, (relMap.get(k) || 0) + d)));
+}
+function temper(p){ return p.temper == null ? .5 : p.temper; }   // 0 温顺 … 1 火药桶
+
+// 老大 = 最早出生的那只（活得久就是资历）。打架时它赢。
+function bossPet(){
+  let b = null;
+  for(const p of pets) if(!b || p.born < b.born) b = p;
+  return b;
+}
+// —— 出门溜达：走出屏幕边上消失一阵，回来时可能带回一个新伙伴 ——
+function startTrip(p){
+  const edge = p.x < .5 ? -1 : 1;
+  // 带伙伴回家的概率刻意压低：多数时候只是自己出去转一圈（不然一出门就带一只，太假）
+  p.trip = { phase:"out", edge, until:0,
+             bring: Math.random() < .12,
+             gift:  Math.random() < .32 };
+  p.beh = { kind:"walk", until: now() + 60 };
+  p.ty = 1;                                        // 出门得先落地
+  speakOnce(pickOne(T().lines.tripOuts));
+}
+function endTrip(p){
+  const bring = !!(p.trip && p.trip.bring);
+  const gift  = !!(p.trip && p.trip.gift);
+  p.trip = null;
+  p.beh = { kind:"idle", until: now() + 2 };
+  if(bring && pets.length < MAX_PETS){
+    const ks = Object.keys(SPECIES);
+    const spk = ks[Math.floor(Math.random()*ks.length)];
+    const q = spawnPet(spk, Math.max(.08, Math.min(.92, p.x + (p.dir > 0 ? -.12 : .12))));
+    if(q){
+      say(T().lines.tripFriend(spNameOf({ sp: spk })));
+      reportRects(true);
+      return;
+    }
+  }
+  p.st.mood = Math.min(100, p.st.mood + 4);
+  p.st.satiety = Math.min(100, p.st.satiety + (gift ? 6 : 0));
+  say(gift ? T().lines.tripGift : T().lines.tripBack);
+}
+
+// 离某只最近的同伴（chooseBehavior 用它决定要不要凑过去）
+function nearestMate(p){  if(!p || pets.length < 2) return null;
+  let best = null;
+  for(const q of pets){
+    if(q === p) continue;
+    const d = Math.abs(q.x - p.x);
+    if(!best || d < best.d) best = { p: q, d };
+  }
+  return best;
+}
+// 当前语言下的物种名（SPECIES 里存的是中文原名）
+function spNameOf(p){  const t = T().species && T().species[p.sp];
+  return (t && t.name) || (SPECIES[p.sp] && SPECIES[p.sp].name) || p.sp;
+}
+function pickOne(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+function startSocial(a, b, kind){
+  const dur   = (SOC_DUR[kind] || 4) * 1000;
+  const until = Date.now() + dur + 2400;        // 先留两秒走过去，再算互动时长
+  // 间距按身体宽度来（一只约 130px）：聊天/亲昵留一点缝，打架就贴脸
+  const close = (kind === "fight" || kind === "quarrel") ? .026 : .042;
+  const mid   = (a.x + b.x) / 2;
+  // 左边那只站左边，右边那只站右边，面对面
+  const pa = a.x <= b.x ? a : b, pb = pa === a ? b : a;
+  // ready=false：这一阶段只是「走过去」，还没开始互动
+  pa.soc = { kind, with: pb.id, until, ready:false, tx: Math.max(.05, Math.min(.95, mid - close)) };
+  pb.soc = { kind, with: pa.id, until, ready:false, tx: Math.max(.05, Math.min(.95, mid + close)) };
+  pa.beh = { kind:"social", until: now() + (dur + 2400)/1000 };
+  pb.beh = { kind:"social", until: now() + (dur + 2400)/1000 };
+  pa.dir = 1; pb.dir = -1;
+  // 两只先降到同一高度再靠拢：不然一个在天上一个在地上，凑到一起也是"隔空"
+  const yMid = ((a.y == null ? 1 : a.y) + (b.y == null ? 1 : b.y)) / 2;
+  pa.ty = pb.ty = Math.max(.2, Math.min(1, yMid));
+  nextSocAt = Date.now() + 18000 + Math.random() * 34000;
+  reportRects(true);
+}
+
+// 两只都站定了才开始说话/动手——不然隔着半个屏幕"碰一下脑袋"太出戏
+function socialBegin(pa, pb, kind){
+  const S = T().lines.soc;
+  const mood = p => `${T().stats.mood} ${Math.round(p.st.mood)}`;
+  if(kind === "chat"){
+    // 八卦模式：一次挑一段对话，两只轮流说，像真的在唠嗑
+    const lines = pickOne(GOSSIP_TXT[LANG] || GOSSIP_TXT.zh);
+    let k = 0;
+    const step = () => {
+      if(!pets.includes(pa) || !pets.includes(pb)) return;
+      if(!pa.soc || pa.soc.kind !== kind) return;        // 被打断就收声
+      if(k >= lines.length) return;
+      const who = (k % 2 === 0) ? pa : pb;
+      say(S.who(spNameOf(who), lines[k]), spNameOf(who) + " · " + mood(who), who);
+      k++;
+      if(k < lines.length) setTimeout(step, 2600);
+    };
+    setTimeout(step, 300);
+  } else {
+    const lineA = pickOne(S[kind] || S.sniff);
+    const lineB = pickOne(S[kind + "2"] || S[kind] || S.sniff);
+    say(S.who(spNameOf(pa), lineA), spNameOf(pa) + " · " + mood(pa), pa);
+    setTimeout(() => {
+      if(kind === "fight") return;                       // 打架顾不上讲话
+      if(!pets.includes(pa) || !pets.includes(pb)) return;
+      say(S.who(spNameOf(pb), lineB), spNameOf(pb) + " · " + mood(pb), pb);
+    }, 2100);
+  }
+
+  // 旁边的小家伙会被吓一跳，停下手上的事看一会儿
+  if(kind === "fight" || kind === "quarrel"){
+    for(const p of pets){
+      if(p === pa || p === pb) continue;
+      if(Math.abs(p.x - pa.x) < .3 || Math.abs(p.x - pb.x) < .3){
+        p.beh = { kind:"idle", until: now() + 2.5 };
+        p.st.mood = Math.max(0, p.st.mood - (kind === "fight" ? 2 : 1));
+      }
+    }
+  }
+}
+
+// 每帧检查：这两只真的凑到一起了吗？凑到了才把 ready 打开
+function socialCheckReady(me){
+  if(!me.soc || me.soc.ready) return;
+  const o = pets.find(x => x.id === me.soc.with);
+  if(!o || !o.soc || o.soc.ready) return;
+  // 各自都站到自己的位置上（不是看彼此间距，否则"面对面站好"反而永远判不到）
+  const here = p =>
+    (p.soc.tx == null || Math.abs(p.x - p.soc.tx) < .012) &&
+    (p.ty == null || Math.abs((p.y == null ? 1 : p.y) - p.ty) < .025);
+  if(!here(me) || !here(o)) return;
+  me.soc.ready = true; o.soc.ready = true;
+  socialBegin(me, o, me.soc.kind);
+}
+
+// 结算：谁先到期谁结算，结算完两边一起清干净
+function endSocial(p){
+  const s = p.soc;
+  p.soc = null;
+  if(p.beh.kind === "social") p.beh = { kind:"idle", until: now() + 1 };
+  const other = pets.find(x => x.id === s.with);
+  if(!other || !other.soc || other.soc.kind !== s.kind) return;   // 对方已经先结算过了
+  other.soc = null;
+  if(other.beh.kind === "social") other.beh = { kind:"idle", until: now() + 1 };
+  if(!s.ready) return;                       // 没走到一起就到期了：等于什么都没发生
+
+  const a = p, b = other, L = T().lines.soc;
+  switch(s.kind){
+    case "fight": {
+      const boss = bossPet();
+      const loser = (a === boss) ? b : (b === boss) ? a : (Math.random() < .5 ? a : b);
+      const win   = loser === a ? b : a;
+      win.st.mood    = Math.max(0, win.st.mood - 3);
+      win.st.energy  = Math.max(0, win.st.energy - 8);
+      loser.st.mood  = Math.max(0, loser.st.mood - 11);
+      loser.st.health= Math.max(0, loser.st.health - 3);
+      loser.st.hygiene = Math.max(0, loser.st.hygiene - 5);
+      bumpRel(a, b, -26);
+      // 飞溅的毛（用尘土粒子表现）
+      for(let k = 0; k < 6; k++)
+        hearts.push({ x: W*a.x + Math.random()*90 - 45, y: petY() - 60, t0: Date.now(), s: Math.random(), e:"✳" });
+      toast(`<b>💥</b> ${L.fightToast(spNameOf(win))}`);
+      break;
+    }
+    case "quarrel":
+      a.st.mood = Math.max(0, a.st.mood - 4);
+      b.st.mood = Math.max(0, b.st.mood - 4);
+      bumpRel(a, b, -12);
+      break;
+    case "play":
+      a.st.mood = Math.min(100, a.st.mood + 7); b.st.mood = Math.min(100, b.st.mood + 7);
+      a.st.energy = Math.max(0, a.st.energy - 5); b.st.energy = Math.max(0, b.st.energy - 5);
+      bumpRel(a, b, 12);
+      break;
+    case "nuzzle":
+      a.st.mood = Math.min(100, a.st.mood + 5); b.st.mood = Math.min(100, b.st.mood + 5);
+      bumpRel(a, b, 10);
+      // 感情到位了才谈得上添丁
+      if(isAdult(a) && isAdult(b) && getRel(a,b) > 60 && Math.random() < .22) layEgg();
+      break;
+    case "chat":
+      a.st.mood = Math.min(100, a.st.mood + 3); b.st.mood = Math.min(100, b.st.mood + 3);
+      bumpRel(a, b, 6);
+      break;
+    default:                                   // sniff：只是打个招呼
+      a.st.mood = Math.min(100, a.st.mood + 1); b.st.mood = Math.min(100, b.st.mood + 1);
+      bumpRel(a, b, 3);
+  }
+}
+
+// 每秒检查一次：有没有两只凑得够近，可以发生点什么
+function trySocial(){
+  if(pets.length < 2) return;
+  if(Date.now() < nextSocAt) return;
+  if(pets.some(p => p.soc)) return;                       // 一次只演一出
+  let best = null;
+  for(let i = 0; i < pets.length; i++) for(let j = i + 1; j < pets.length; j++){
+    const a = pets[i], b = pets[j];
+    if(a.trip || b.trip) continue;                          // 出门的不参与
+    if(a.climb || b.climb) continue;                        // 挂在墙上的不参与
+    if(a.beh.kind === "sleep" || b.beh.kind === "sleep") continue;
+    if((a.air || 0) > 12 || (b.air || 0) > 12) continue;   // 正在飞的别搭理
+    if(a.lift > 4 || b.lift > 4) continue;                // 被拎在手里的也别烦
+    const d = Math.abs(a.x - b.x);
+    if(d > .09) continue;                                  // 得先走到够近才算"碰面"
+    // 高度也要在同一层：一个半空一个地上，x 再接近也不算碰面
+    if(Math.abs((a.y == null ? 1 : a.y) - (b.y == null ? 1 : b.y)) > .16) continue;
+    if(!best || d < best.d) best = { a, b, d };
+  }
+  if(!best) return;
+  const { a, b } = best;
+
+  const kids  = petStage(a) === "baby" || petStage(b) === "baby";
+  const fresh = Math.min(petAgeMin(a), petAgeMin(b)) < 3;    // 刚来的三分钟先熟悉环境
+  const r     = getRel(a, b);
+  const wild  = (temper(a) + temper(b)) / 2;
+  let kind, p = Math.random();
+
+  if(kids || fresh){
+    kind = p < .45 ? "play" : (p < .70 ? "sniff" : (p < .90 ? "nuzzle" : "chat"));
+  } else if(r <= -25){
+    kind = p < .40 ? "quarrel" : (p < .72 ? "fight" : "sniff"); // 积怨已深，见面就吵
+  } else if(r >= 35){
+    kind = p < .30 ? "nuzzle" : (p < .55 ? "play" : (p < .80 ? "chat" : "sniff"));
+  } else if(p < .16 + wild * .22){
+    kind = "quarrel";                                           // 脾气越大越容易呛起来
+  } else if(p < .42){
+    kind = "chat";                                              // 关系一般的时候最爱八卦
+  } else if(p < .64){
+    kind = "sniff";
+  } else if(p < .86){
+    kind = "play";
+  } else {
+    kind = "nuzzle";
+  }
+  startSocial(a, b, kind);
+}
+
+// 每秒逻辑（每只宠物各过各的）
+setInterval(()=>{
+  const ph = dayPhase();
+  const d = new Date().getDate(), hh = new Date().getHours();
+  if(d !== greetDay){ greetDay = d; greetedM = false; greetedN = false; }
+
+  for(let i = pets.length - 1; i >= 0; i--){
+    if(i >= pets.length) continue;
+    const p = pets[i];
+    bindActive(i);
+    // 出门在外：只数着时间，代谢/排泄/互动都先停（回来再接着过）
+    if(p.trip && p.trip.phase === "away"){
+      if(Date.now() > p.trip.until){
+        p.trip.phase = "back";
+        p.x = p.trip.edge > 0 ? .995 : .005;
+        p.dir = -p.trip.edge;
+        p.beh = { kind:"walk", until: now() + 30 };
+      }
+      flushActive();
+      continue;
+    }
+    const sp = SPECIES[cur];
+    const stage = petStage(p);
+    const act = behavior.kind==="sleep" ? .25 : (behavior.kind==="walk"||behavior.kind==="play" ? 1.4 : 1);
+    const youngK = stage === "baby" ? 1.5 : stage === "young" ? 1.2 : 1;   // 小崽儿饿得快
+    ST.satiety = Math.max(0, ST.satiety - sp.decay.satiety * act * 0.6 * ph.food * youngK);
+    ST.energy  = Math.max(0, Math.min(100, behavior.kind==="sleep"
+                ? ST.energy + 2.2 + Math.max(0, ph.energy)
+                : ST.energy - sp.decay.energy * act * 0.5 + Math.min(0, ph.energy)));
+    ST.mood    = Math.max(0, Math.min(100, ST.mood - sp.decay.mood * .5
+                - poops.length * .12 - (sick?0.6:0) + ph.mood));
+    ST.hygiene = Math.max(0, ST.hygiene - sp.decay.hygiene * .5 - poops.length * .08);
+
+    // 长大了就说一声
+    if(lastStageNote[p.id] && lastStageNote[p.id] !== stage){
+      if(stage === "young") speakOnce(T().lines.growYoung(SPECIES[p.sp].name || p.sp));
+      if(stage === "adult") speakOnce(T().lines.growAdult(SPECIES[p.sp].name || p.sp));
+      if(stage === "elder") speakOnce(T().lines.growElder(SPECIES[p.sp].name || p.sp));
+    }
+    lastStageNote[p.id] = stage;
+
+    // 排泄（只在地上拉，空中就别扔了）
+    if(poopCooldown > 0) poopCooldown -= 1;
+    if(poopCooldown <= 0 && ST.satiety > 40 && (p.y == null || p.y > .85)
+       && Math.random() < 0.010 && behavior.kind!=="sleep"){
+      poops.push({ x: petX() + (Math.random()*60-30), t: Date.now(), sp: cur });
+      poopCooldown = 60 + Math.random()*60;
+      speakOnce(spLine("poop"));
+      ST.hygiene = Math.max(0, ST.hygiene - 3);
+    }
+    // 踩到排泄物
+    if(!sick && behavior.kind==="walk"){
+      for(const q of poops){
+        if(Math.abs(q.x - petX()) < 30){
+          ST.mood = Math.max(0, ST.mood - 4); ST.hygiene = Math.max(0, ST.hygiene - 4);
+          speakOnce(T().lines.stepPoop);
+          q.x = petX() + dir * -200;
+          break;
+        }
+      }
+    }
+    // 生病
+    if(!sick && (ST.satiety < 12 || ST.hygiene < 12) && Math.random() < 0.02){
+      sick = true; sickSince = Date.now();
+      speakOnce(T().lines.sickSay(spName()));
+      toast(`<b>💉</b> ${T().lines.sickToast(spName())}`);
+    }
+    if(sick && Date.now() - sickSince > 180000) ST.health = Math.max(0, ST.health - 2);
+
+    // 寿终：自然老去，或者身体彻底垮了
+    const ageMin = petAgeMin(p);
+    if(ageMin > petLifespan()) { petDie(p, "old"); continue; }
+    if(ST.health <= 0)         { petDie(p, "weak"); continue; }
+
+    if(now() > behavior.until) chooseBehavior();
+    // 互动到期：结算（可能是这只、也可能是对方先到期，endSocial 内部保证只结算一次）
+    if(p.soc && Date.now() > p.soc.until){ endSocial(p); bindActive(i); }
+    flushActive();
+  }
+
+  // 蛋孵化
+  for(let i = eggs.length - 1; i >= 0; i--)
+    if(Date.now() >= eggs[i].hatchAt) hatchEgg(i);
+
+  maybeBreed();
+  maybeStealCursor();
+  trySocial();
+
+  // 全局：报时 / 关怀 / 日程 / 碎碎念（都只让"当前那只"说）
+  if(pets.length){
+    bindActive(activeIdx);
+    const hNow = new Date().getHours();
+    if(hNow !== lastHour){ lastHour = hNow; say(timeLine(), spName()); }
+    if(Date.now() - lastCareLine > 25 * 60000){
+      lastCareLine = Date.now();
+      const c = careLine();
+      if(c) say(c, T().lines.careTag);
+    }
+    if(hh >= 23 && !greetedN){ greetedN = true; say(T().lines.goodNight, spName()); }
+    routineDue();
+    maybeChat();
+  } else if(Date.now() - lastEmptyNote > 60000){
+    lastEmptyNote = Date.now();          // 一只都没有了：门口会自己来一颗蛋
+    eggs.push({ x:.5, sp: Object.keys(SPECIES)[Math.floor(Math.random()*7)],
+                bornAt: Date.now(), hatchAt: Date.now() + LIFE.hatch*60000 });
+  }
+  updateMenuBadge();
+}, 1000);
+let lastEmptyNote = 0;
+
+// ---------------- 绘制 ----------------
+// ---------------- 各物种的粑粑造型 ----------------
+function drawPoop(sp, age, t){
+  switch(sp){
+    case "rabbit":                     // 兔子：一小堆干球
+      ctx.fillStyle = "#6b5237";
+      [[-9,0],[3,-3],[10,2],[-2,4]].forEach(([a,b])=>{
+        ctx.beginPath(); ctx.ellipse(a,b,5,4,0,0,7); ctx.fill(); });
+      break;
+    case "chicken": case "duck":       // 禽类：白色的一摊
+      ctx.fillStyle = "#e9e5d7";
+      ctx.beginPath(); ctx.ellipse(0,1,13,6,0,0,7); ctx.fill();
+      ctx.fillStyle = "#d2ccb8";
+      ctx.beginPath(); ctx.ellipse(-4,-1,5,3,0,0,7); ctx.fill();
+      break;
+    case "snake":                      // 蛇：细长一条
+      ctx.fillStyle = "#5f4a33";
+      ctx.beginPath(); ctx.ellipse(0,0,15,4,0,0,7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-12,-1,4,3,0,0,7); ctx.fill();
+      break;
+    case "spider":                     // 蜘蛛：几粒小黑点
+      ctx.fillStyle = "#2f2a22";
+      [[-8,0],[-1,-3],[6,1]].forEach(([a,b])=>{
+        ctx.beginPath(); ctx.arc(a,b,3.2,0,7); ctx.fill(); });
+      break;
+    default:                           // 猫狗：经典三层
+      ctx.fillStyle = "#7a5230";
+      ctx.beginPath(); ctx.ellipse(0,0,11,7,0,0,7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0,-6,7,5,0,0,7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0,-11,4,3.4,0,0,7); ctx.fill();
+  }
+  if(age > 1){ ctx.fillStyle="rgba(180,220,140,.8)"; ctx.font="10px system-ui";
+    ctx.fillText("🪰", 8, -14 + Math.sin(t*7)*3); }
+}
+
+function shade(c, p){
+  const n = parseInt(c.slice(1),16), r=n>>16, g=(n>>8)&255, b=n&255;
+  const f = v => Math.max(0, Math.min(255, Math.round(v*(1+p))));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
+let hearts = [];      // 粒子
+
+function draw(time){
+  const t = time/1000;
+  const keepActive = activeIdx;        // 画完一轮要还原：draw 里的 bindActive(i) 会把"当前宠物"改掉
+  ctx.setTransform(DPR,0,0,DPR,0,0);   // 高分屏：内部像素 = CSS 像素 × DPR
+  ctx.clearRect(0,0,W,H);
+
+  // 排泄物（每种动物长得都不一样）
+  poops.forEach(q=>{
+    const age = (Date.now()-q.t)/60000;
+    ctx.save(); ctx.translate(q.x, GROUND()+2);
+    drawPoop(q.sp || "cat", age, t);
+    ctx.restore();
+  });
+
+  // —— 每只宠物各自更新位置并画出来 ——
+  for(let i = 0; i < pets.length; i++){
+    const me0 = pets[i];
+    if(me0.trip && me0.trip.phase === "away") continue;   // 出门在外，这会儿画不着
+    bindActive(i);
+    const me = pets[i];
+    const held = !!(dragWho && dragWho === me.id);   // 正被捏在这只手里
+    const sleeping = behavior.kind==="sleep";
+    // —— 爬墙：高度和位置由自己接管，不走通用的平滑 ——
+    let climbing = !!me.climb;
+    if(climbing){
+      const cl = me.climb, age = Date.now() - cl.t0;
+      if(cl.phase === "hang"){
+        me.y = me.ty = ceilYFor(me);
+        // 先贴着顶边横着蹭两下（像在找落脚点）
+        if(age > 400 && age < 1600) me.x = Math.max(.05, Math.min(.95, me.x + .0011 * me.dir));
+        if(age >= 1600){ cl.phase = "down"; cl.t0 = Date.now(); speakOnce(T().lines.climbDown); }
+      } else {
+        me.y = me.ty = Math.min(cl.toY, me.y + .0032);      // 一点点往下蹭
+        me.lift = 0;
+        // 落地这一帧要把 climbing 也关掉：endClimb 会把 me.climb 置空，
+        // 后面画姿态的代码再去读 me.climb.phase 就会抛异常，rAF 直接停摆、整个画面冻住。
+        if(me.y >= cl.toY - .003){ endClimb(me); climbing = false; }
+      }
+      px = me.x; dir = me.dir; petLift = 0;
+    }
+    // 高度：朝目标高度平滑靠拢（顺着看不见的台阶往上飘，不会瞬移）
+    if(!climbing && !draggingPet && me.ty != null && Math.abs(me.ty - me.y) > .0015)
+      me.y += Math.sign(me.ty - me.y) * Math.min(.0055, Math.abs(me.ty - me.y));
+    const slow = sick ? 0.45 : 1;
+    const bb = PET_BOX[cur] || PET_BOX.cat;
+    const kk = 1.25 * petScale * stageScale();
+    const boxHalf = Math.max(50, Math.max(-bb[0], bb[2]) * kk + 12);
+    const margin = Math.min(0.46, boxHalf / W);
+    // —— 出门 / 回家：沿地面一路走到屏幕边上 ——
+    let moving = behavior.kind==="walk" || behavior.kind==="fly" || behavior.kind==="hop";
+    if(me.trip && !draggingPet && !climbing){
+      moving = false;                       // 这一段自己走，别和普通散步叠加
+      if(me.trip.phase === "out"){
+        dir = me.trip.edge;
+        px += .0045 * dir;
+        if(px <= .008 || px >= .992){
+          me.trip.phase = "away";
+          me.trip.until = Date.now() + (3 + Math.random()*5) * 60000;
+        }
+      } else if(me.trip.phase === "back"){
+        dir = -me.trip.edge;
+        px += .0045 * dir;
+        if(px > .07 && px < .93) endTrip(me);
+      }
+    }
+
+    // —— 社交互动：先挪到对方旁边，再面对面 ——
+    if(me.soc && me.soc.tx != null && !draggingPet && !climbing){
+      const dx = me.soc.tx - px;
+      if(Math.abs(dx) > .0015){
+        px += Math.sign(dx) * Math.min(.006, Math.abs(dx));   // 走近要利索点，别磨半天
+        dir = Math.sign(dx);
+      }
+      socialCheckReady(me);
+    }
+    // —— 偷指针：先悄悄蹭到指针旁边（走到了才叼） ——
+    if(grab && grab.p === me && grab.phase === "approach" && !draggingPet){
+      const tx = grab.cx / W, d = tx - px;
+      if(Math.abs(d) > .006){
+        px += Math.sign(d) * Math.min(.0055, Math.abs(d));
+        dir = Math.sign(d);
+        moving = false;
+      } else { grab.phase = "snatch"; grab.t0 = Date.now(); }
+    }
+    if(moving && !draggingPet && !climbing){
+      const step = behavior.kind==="fly" ? 0.0021 : behavior.kind==="hop" ? 0.0026 : 0.0016;
+      px += step * dir * slow;
+      if(px > 1 - margin){ px = 1 - margin; dir = -1; }
+      if(px < margin){ px = margin; dir = 1; }
+    }
+    if(behavior.kind==="beg" && !climbing && !draggingPet && Math.abs(px-0.5)>0.03){ px += (0.5>px?1:-1)*0.0012*slow; dir = 0.5>px?1:-1; }
+    if(!draggingPet && petLift > 0) petLift = Math.max(0, petLift - 14);   // 松手后落地
+
+    // 腾空：鸡/鸭扑翅膀往上飞，猫狗兔原地小跳（都是渐变，不会瞬移）
+    let airTarget = 0;
+    if(!draggingPet && !climbing){
+      if(behavior.kind==="fly")      airTarget = 96 + Math.sin(t*1.7)*38;
+      else if(behavior.kind==="hop") airTarget = Math.abs(Math.sin(t*5.4)) * 24;
+    }
+    if(held) petAir = 0;                       // 被拎在手里：一点腾空残余都不能有
+    else petAir += (airTarget - petAir) * 0.09;
+
+    // 被拎着时身体一抖都不抖：呼吸/迈步/打架的这些小位移全部关掉，
+    // 眼睛看到的那块像素才和指针严丝合缝（差两三像素，手感就是"发飘"）。
+    const bob = held ? 0 : sleeping ? Math.sin(t*1.2)*2
+      : Math.abs(Math.sin(t*(behavior.kind==="walk"?7:3.4)))*(behavior.kind==="walk"?5:2.4);
+    const x = petX() + ((me.soc && me.soc.kind === "fight" && !held) ? Math.sin(t*34 + i*1.7) * 4 : 0);
+    const y = petY() - bob - petLift - petAir;
+
+    // 影子（越飞越高越小越淡，落地恢复）
+    const hgt = Math.max(0, GROUND() - petYFor(me));          // 离地高度
+    const liftAll = petLift + petAir + hgt * .9;
+    const shadowK = Math.max(.18, 1 - liftAll/320);
+    const shW = 52 * shadowK * stageScale();
+    ctx.save(); ctx.globalAlpha=.3*shadowK; ctx.fillStyle="#000";
+    ctx.beginPath(); ctx.ellipse(x, petY()+6, shW, 9*shadowK*stageScale(), 0,0,7); ctx.fill(); ctx.restore();
+
+    // 老年：身上蒙一层很淡的暖灰，动作慢
+    if(petStage(pets[i]) === "elder" && !sick){
+      ctx.save(); ctx.globalAlpha=.14; ctx.fillStyle="#b9b2a6";
+      ctx.beginPath(); ctx.ellipse(x, y-50*kk, 62*kk/1.5, 62*kk/1.5, 0,0,7); ctx.fill(); ctx.restore();
+    }
+
+    ctx.save();
+    ctx.translate(x,y);
+    if(climbing){
+      // 贴墙的姿势：身体微微倾斜，发力时一紧一松
+      const cl = me.climb;
+      const down = cl && cl.phase === "down";
+      const sq = Math.sin(t * (down ? 6.4 : 2.4)) * (down ? .05 : .028);
+      ctx.rotate((down ? -.1 : .05) * dir + Math.sin(t * (down ? 7 : 2.6)) * .03);
+      ctx.scale(dir * kk * (1 + sq), kk * (1 - sq));
+    } else {
+      ctx.scale(dir*kk, kk);
+    }
+    drawPet(SPECIES[cur], t, sleeping);
+    if(behavior.kind==="fly"){   // 扑翅：脚下扬起的小风线
+      ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 2; ctx.lineCap="round";
+      const f = (Math.sin(t*14)+1)/2;
+      ctx.beginPath(); ctx.arc(-6, 34, 16+f*5, .2, Math.PI-.2); ctx.stroke();
+    }
+    ctx.restore();
+
+    // 爬墙：脚下蹭掉的墙皮屑（一路往下掉，看得出它在使劲）
+    if(climbing){
+      const ks3 = stageScale();
+      ctx.save();
+      for(let j = 0; j < 3; j++){
+        const ph = ((t * .55) + j * .33) % 1;
+        ctx.globalAlpha = (1 - ph) * .5;
+        ctx.fillStyle = "#cfd6e2";
+        ctx.fillRect(x - 26*ks3 + j*22*ks3 + Math.sin(t*3 + j)*3,
+                     y + 30*ks3 + ph * 46, 3, 5);
+      }
+      ctx.globalAlpha = 1;
+      // 抓在天花板上的两只小爪子
+      if(me.climb && me.climb.phase === "hang"){
+        ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+        const ty2 = y - (PET_BOX[cur] ? -PET_BOX[cur][1] : 92) * kk + 4;
+        [-1, 1].forEach(sd=>{
+          ctx.beginPath();
+          ctx.arc(x + sd*16*ks3, ty2 + 4, 7, Math.PI*1.05, Math.PI*1.95);
+          ctx.stroke();
+        });
+      }
+      ctx.restore();
+    }
+
+    // 生病：汗滴 + 头顶 🤒（不再是看不懂的大蓝圈）
+    if(sick){
+      const cyc = (t*.8)%1;
+      ctx.save();
+      for(let j=0;j<2;j++){
+        const a = (cyc + j*.5) % 1;
+        ctx.globalAlpha = 1-a;
+        ctx.fillStyle = "#8fc7ff"; ctx.font = "13px system-ui";
+        ctx.fillText("💧", x - 30*stageScale() + j*54*stageScale(), y - 86*stageScale() - a*26);
+      }
+      ctx.globalAlpha = 1;
+      ctx.font = "15px system-ui"; ctx.textAlign = "center";
+      ctx.fillText("🤒", x + 4, y - 108*stageScale() + Math.sin(t*2)*3);
+      ctx.textAlign = "left";
+      ctx.restore();
+    }
+
+    // 互动表情：吵架 💢 / 打架 💥 / 一起玩 🎵 / 蹭头 ❤️ / 闻一闻 👃 / 八卦 💬
+    if(me.soc && me.soc.ready){
+      const ks2 = stageScale();
+      const ic = SOC_ICON[me.soc.kind] || "…";
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.font = "20px system-ui";
+      ctx.fillText(ic, x - 44*ks2, y - 108*ks2 + Math.sin(t*6)*3);
+      if(me.soc.kind === "fight"){
+        ctx.globalAlpha = .65 + Math.sin(t*13)*.35;
+        ctx.font = "22px system-ui";
+        ctx.fillText("💥", x + 30*ks2, y - 74*ks2 + Math.sin(t*11)*5);
+      }
+      ctx.restore();
+      ctx.textAlign = "left";
+    }
+
+    // 睡眠 zzz
+    if(sleeping){
+      ctx.fillStyle="rgba(200,215,240,.6)"; ctx.font="600 22px system-ui";
+      for(let j=0;j<3;j++){
+        const a=(t*.5+j*.33)%1; ctx.globalAlpha=1-a;
+        ctx.fillText("z", x+58*stageScale()+j*12, y-70*stageScale()-a*50-j*5);
+      }
+      ctx.globalAlpha=1;
+    }
+    // 饥饿提示
+    if(ST.satiety<28 && !sleeping){
+      ctx.fillStyle="rgba(255,180,84,.9)"; ctx.font="600 26px system-ui";
+      ctx.fillText("…", x+58*stageScale(), y-60*stageScale());
+    }
+    // 待确认提醒：只有"主要那只"头顶挂感叹号，免得满屏都是
+    if(i === activeIdx){
+      let hasWait = false; TASKS.forEach(tk=>{ if(tk.status==="waiting") hasWait=true; });
+      if(hasWait && t%1<0.6){ ctx.font="22px system-ui"; ctx.fillText("❗", x-64, y-64); }
+    }
+    flushActive();
+  }
+
+  // —— 偷指针：这一帧把指针拽到哪儿 ——
+  updateGrabCursor();
+
+  // —— 蛋：快孵化时会晃 ——
+  eggs.forEach(e=>{
+    const x = W*e.x, y = GROUND()+2;
+    const left = Math.max(0, e.hatchAt - Date.now()) / 60000;
+    const wob = left < 0.15 ? Math.sin(t*9)*3 : Math.sin(t*2)*1;
+    ctx.save(); ctx.translate(x, y);
+    ctx.rotate(wob * 0.02);
+    ctx.fillStyle = "#fdf6e8"; ctx.strokeStyle = "#e2d6bd"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0,-20,20,26,0,0,7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#e8d9b8";
+    [[-7,-26],[6,-18],[-2,-8]].forEach(([a,b])=>{ ctx.beginPath(); ctx.ellipse(a,b,3.4,4.6,0,0,7); ctx.fill(); });
+    ctx.restore();
+  });
+  // 爱心粒子
+  hearts = hearts.filter(h=>Date.now()-h.t0<1200);
+  hearts.forEach(h=>{
+    const p=(Date.now()-h.t0)/1200;
+    ctx.globalAlpha=1-p; ctx.fillStyle="#ff8fa8"; ctx.font=`${16+h.s*8}px system-ui`;
+    ctx.fillText(h.e || "♥", h.x + Math.sin(p*6+h.s*9)*14, h.y - p*70);
+    ctx.globalAlpha=1;
+  });
+
+  // 气泡每帧跟着宠物（它溜达/飞/被拎起来时，对话框不会傻站在原地）
+  if(pets[keepActive]) bindActive(keepActive);
+  placeBubble();
+}
+
+// 限帧：拖拽/爬墙 60fps（要跟手）；正常 30fps；睡着发呆降到 15fps（省电，肉眼看不出）
+let _lastFrame = 0;
+function loop(time){
+  // 以前拖拽时如果宠物正好在 idle/sleep，会被压到 15fps，
+  // 手在屏幕上走 60fps、宠物只跳 15 帧，怎么调都"跟不上手"。
+  const busy = draggingPet || pets.some(p => p.climb);
+  const still = !busy && (behavior.kind === "sleep" || behavior.kind === "idle")
+                && petAir < 1 && !el("bubble").classList.contains("show");
+  const frame = busy ? 16 : (still ? 66 : 33);
+  if(time - _lastFrame >= frame){
+    _lastFrame = time;
+    // 单帧异常不能拖垮整个动画：以前 draw 里抛一次错，requestAnimationFrame 就再也不会被排上，
+    // 画面直接冻在最后一帧（而且看起来像"宠物凭空消失了"）。
+    try { draw(time); }
+    catch(e){ if(window.petHub && window.petHub.trace) window.petHub.trace("DRAWERR " + e.message); }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---------------- 绘制宠物（复用 tiny-lm 造型） ----------------
+function eyes(open,t){
+  if(open){
+    ctx.fillStyle="#0b0e14";
+    const bl=(t%4.2)<.12?.15:1;
+    ctx.beginPath(); ctx.ellipse(-13,-8,5,5*bl,0,0,7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(13,-8,5,5*bl,0,0,7); ctx.fill();
+  } else {
+    ctx.strokeStyle="#0b0e14"; ctx.lineWidth=3; ctx.lineCap="round";
+    ctx.beginPath(); ctx.arc(-13,-8,6,.15,Math.PI-.15); ctx.stroke();
+    ctx.beginPath(); ctx.arc(13,-8,6,.15,Math.PI-.15); ctx.stroke();
+  }
+}
+function bodyEllipse(w,h,c,y=0){ ctx.fillStyle=c; ctx.beginPath(); ctx.ellipse(0,y,w,h,0,0,7); ctx.fill(); }
+// 腿部：walking 时前后摆动；spec = [[x, y0, y1, 线宽, 相位], ...]
+function legs(color, t, spec, sleeping){
+  const walking = !sleeping && (behavior.kind === "walk" || behavior.kind === "play");
+  ctx.strokeStyle = color; ctx.lineCap = "round";
+  spec.forEach(([x, y0, y1, w, ph], i) => {
+    const swing = walking ? Math.sin(t * 7 + (ph || i) * Math.PI) * 6 : 0;
+    ctx.lineWidth = w || 9;
+    ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x + swing, y1); ctx.stroke();
+  });
+}
+// 蹼足 / 鸡爪
+function webFoot(color, x, y, s){
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.moveTo(x - 11*s, y); ctx.lineTo(x + 11*s, y);
+  ctx.lineTo(x + 4*s, y + 9*s); ctx.lineTo(x - 4*s, y + 9*s); ctx.closePath(); ctx.fill();
+}
+
+function drawPet(s,t,sleeping){
+  const c=s.accent, dark=shade(c,-.35), light=shade(c,.18);
+  switch(cur){
+    case "cat":
+      legs(dark, t, [[-36,14,44,9,0],[-20,14,44,9,1]], sleeping);   // 后腿
+      legs(c,    t, [[20,14,44,9,1],[34,14,44,9,0]], sleeping);     // 前腿
+      ctx.strokeStyle=c; ctx.lineWidth=11; ctx.lineCap="round";
+      ctx.beginPath(); ctx.moveTo(58,4);
+      ctx.quadraticCurveTo(96,-18+Math.sin(t*2.2)*10,84,-54); ctx.stroke();
+      bodyEllipse(66,42,c); bodyEllipse(52,30,light);
+      ctx.fillStyle=c; ctx.beginPath(); ctx.arc(0,-34,32,0,7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-28,-54); ctx.lineTo(-34,-86); ctx.lineTo(-8,-66); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(28,-54); ctx.lineTo(34,-86); ctx.lineTo(8,-66); ctx.fill();
+      eyes(!sleeping,t);
+      ctx.fillStyle="#e8837a"; ctx.beginPath(); ctx.arc(0,-24,3.4,0,7); ctx.fill();
+      break;
+    case "dog":
+      legs(dark, t, [[-38,16,46,10,0],[-20,16,46,10,1]], sleeping);
+      legs(c,    t, [[22,16,46,10,1],[38,16,46,10,0]], sleeping);
+      ctx.strokeStyle=c; ctx.lineWidth=13; ctx.lineCap="round";
+      ctx.beginPath(); ctx.moveTo(62,0);
+      ctx.quadraticCurveTo(98,-10+Math.sin(t*7)*18,90,-40); ctx.stroke();
+      bodyEllipse(72,44,c); bodyEllipse(56,30,light);
+      ctx.fillStyle=c; ctx.beginPath(); ctx.arc(0,-38,36,0,7); ctx.fill();
+      ctx.fillStyle=dark;
+      ctx.beginPath(); ctx.ellipse(-42,-38,15,29,.32,0,7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(42,-38,15,29,-.32,0,7); ctx.fill();
+      eyes(!sleeping,t);
+      ctx.fillStyle=light; ctx.beginPath(); ctx.ellipse(20,-24,18,12,0,0,7); ctx.fill();
+      ctx.fillStyle="#2a1c17"; ctx.beginPath(); ctx.ellipse(34,-27,5.5,4.5,0,0,7); ctx.fill();
+      break;
+    case "chicken":
+      legs("#e8b45a", t, [[-10,24,40,5,0],[12,24,40,5,1]], sleeping);
+      webFoot("#f2b53c", -10, 40, 1); webFoot("#f2b53c", 12, 40, 1);
+      bodyEllipse(48,40,c);
+      ctx.fillStyle=light; ctx.beginPath(); ctx.ellipse(-6,4,32,24,0,0,7); ctx.fill();
+      ctx.fillStyle=c; ctx.beginPath(); ctx.arc(24,-30,22,0,7); ctx.fill();
+      ctx.fillStyle="#e05a4f"; ctx.beginPath();
+      ctx.arc(16,-52,7,0,7); ctx.arc(26,-56,8,0,7); ctx.arc(36,-52,7,0,7); ctx.fill();
+      ctx.fillStyle="#f2b53c"; ctx.beginPath();
+      ctx.moveTo(44,-32); ctx.lineTo(62,-27); ctx.lineTo(44,-22); ctx.fill();
+      eyes(!sleeping,t); break;
+    case "duck":
+      legs("#f2a03c", t, [[-8,6,34,6,0],[10,6,34,6,1]], sleeping);
+      webFoot("#f2b53c", -8, 34, 1.1); webFoot("#f2b53c", 10, 34, 1.1);
+      bodyEllipse(56,36,c,6);
+      ctx.fillStyle=light; ctx.beginPath(); ctx.ellipse(-8,10,38,20,0,0,7); ctx.fill();
+      ctx.fillStyle=c; ctx.beginPath(); ctx.moveTo(20,-8);
+      ctx.quadraticCurveTo(44,-52,58,-44); ctx.lineTo(66,-22);
+      ctx.quadraticCurveTo(52,-16,40,12); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(60,-46,18,0,7); ctx.fill();
+      ctx.fillStyle="#f2b53c"; ctx.beginPath(); ctx.roundRect(70,-50,30,10,5); ctx.fill();
+      eyes(!sleeping,t); break;
+    case "rabbit":
+      legs(dark, t, [[-26,10,42,13,0],[-6,10,42,13,1]], sleeping);   // 后腿粗壮
+      legs(c,    t, [[24,14,44,8,1],[36,14,44,8,0]], sleeping);      // 前腿短
+      ctx.fillStyle=light; ctx.beginPath(); ctx.arc(-58,8,13,0,7); ctx.fill();
+      bodyEllipse(48,42,c);
+      ctx.fillStyle=c; ctx.beginPath(); ctx.arc(6,-34,28,0,7); ctx.fill();
+      ctx.save(); ctx.translate(2,-56); ctx.rotate(-.14);
+      ctx.fillStyle=c; ctx.beginPath(); ctx.ellipse(-8,-34,9,34,0,0,7); ctx.fill();
+      ctx.fillStyle="#f6bccd"; ctx.beginPath(); ctx.ellipse(-8,-34,4.5,26,0,0,7); ctx.fill();
+      ctx.restore();
+      ctx.save(); ctx.translate(16,-56); ctx.rotate(.16);
+      ctx.fillStyle=c; ctx.beginPath(); ctx.ellipse(8,-34,9,34,0,0,7); ctx.fill();
+      ctx.fillStyle="#f6bccd"; ctx.beginPath(); ctx.ellipse(8,-34,4.5,26,0,0,7); ctx.fill();
+      ctx.restore();
+      eyes(!sleeping,t);
+      ctx.fillStyle="#e88ca8"; ctx.beginPath(); ctx.arc(6,-24,3,0,7); ctx.fill();
+      break;
+    case "snake": {
+      ctx.strokeStyle=c; ctx.lineWidth=17; ctx.lineCap="round";
+      ctx.beginPath();
+      const sway=Math.sin(t*1.4)*6;
+      ctx.moveTo(-90,18);
+      ctx.bezierCurveTo(-60,62,10,62,30,26);
+      ctx.bezierCurveTo(46,-4,-10,-24,-30,4);
+      ctx.bezierCurveTo(-44,24,6,30,26,6+sway);
+      ctx.stroke();
+      ctx.fillStyle=light; ctx.beginPath(); ctx.ellipse(30,4+sway,17,12,-.4,0,7); ctx.fill();
+      eyes(!sleeping,t); break; }
+    case "spider":
+      ctx.strokeStyle=dark; ctx.lineWidth=6; ctx.lineCap="round";
+      for(let i=0;i<4;i++){
+        const side=i<2?-1:1;
+        for(let j=0;j<2;j++){
+          ctx.beginPath(); ctx.moveTo(side*10,-4);
+          ctx.lineTo(side*(44+j*26), -22+Math.sin(t*2+i+j)*7+j*30);
+          ctx.stroke();
+        }
+      }
+      ctx.fillStyle=c; ctx.beginPath(); ctx.ellipse(0,-6,26,22,0,0,7); ctx.fill();
+      ctx.fillStyle=light; ctx.beginPath(); ctx.arc(0,-34,14,0,7); ctx.fill();
+      if(!sleeping){ ctx.fillStyle="#1a1020";
+        [[-6,-36],[6,-36],[-6,-31],[6,-31]].forEach(([a,b])=>{
+          ctx.beginPath(); ctx.arc(a,b,2,0,7); ctx.fill(); }); }
+      break;
+  }
+}
+
+// ---------------- 交互：点击 / 右键 / 清理 ----------------
+let cur = "cat";
+
+// 命中哪一只？返回下标（-1 = 没点到）。只做判断，不改当前宠物。
+function hitPet(mx,my){
+  for(let i = pets.length - 1; i >= 0; i--){
+    const p = pets[i];
+    if(p.trip && p.trip.phase === "away") continue;      // 出门了，点不到
+    const b = petBoxFor(p);
+    if(mx >= b.left && mx <= b.right && my >= b.top && my <= b.bottom) return i;
+  }
+  return -1;
+}
+function hitPoop(mx,my){
+  return poops.findIndex(p => Math.abs(p.x-mx)<28 && Math.abs(my-(GROUND()+2))<30);
+}
+
+// Electron 悬浮窗：document 级判定指针是否在可交互区（HUD/菜单/宠物/排泄物）
+const wvHost = (window.chrome && window.chrome.webview) ? window.chrome.webview : null;   // WebView2 壳
+document.addEventListener("mousemove", e=>{
+  // 拖拽期间跳过每帧命中判定：一次手势里会来上百条 move，
+  // 每条都去算 hitPet + 发一次 setInteractive，白占主线程、还拖慢跟手。
+  if(draggingPet) return;
+  const overUI = !!(e.target.closest && e.target.closest("#hud,#menu,#bubble,#toasts"));
+  const hit = overUI || hitPet(e.clientX,e.clientY) >= 0 || hitPoop(e.clientX,e.clientY)>=0;
+  cv.style.cursor = hit ? "pointer" : "default";
+  if(window.petHub) window.petHub.setInteractive(hit);
+  else if(wvHost) wvHost.postMessage(hit ? "hit:1" : "hit:0");
+}, {passive:true});
+
+// 诊断探针：确认壳转发过来的点击到底落在哪个元素（默认不写日志）
+document.addEventListener("click", e=>{
+  if(window.petHub && window.petHub.trace){
+    const t = e.target;
+    window.petHub.trace("docclick " + Math.round(e.clientX) + "," + Math.round(e.clientY)
+      + " @" + ((t && (t.id || t.tagName)) || "?"));
+  }
+}, true);
+
+cv.addEventListener("click", e=>{
+  if(window.petHub && window.petHub.trace)
+    window.petHub.trace("cvclick " + Math.round(e.clientX) + "," + Math.round(e.clientY));
+  const pi = hitPoop(e.clientX,e.clientY);
+  if(pi>=0){ cleanPoop(pi); return; }
+  const who = hitPet(e.clientX,e.clientY);
+  if(who >= 0 && !dragMovedFar){
+    bindActive(who);
+    hearts.push({x:petX(), y:petY()-90, t0:Date.now(), s:Math.random()});
+    ST.mood = Math.min(100, ST.mood + 1.5);
+    if(Math.random()<.35) say(spLine("pet"));
+    flushActive();
+    reportRects(true);
+  }
+});
+
+// ---------------- 叼走指针：趁你不在，偷偷把鼠标叼走玩一会儿 ----------------
+// 真的会挪动系统指针（壳层 SetCursorPos）。所以规矩定死：
+//   · 只有连续 12 秒没碰鼠标才动手；· 4~10 分钟最多一次；
+//   · 你一动鼠标 / 一点击，壳层立刻喊 grab:lost，它马上松口。
+let grab = null, grabPending = false;
+let grabNextAt = Date.now() + 150000;
+let lastCursorInfo = null;
+
+function hasShell(){ return !!(window.chrome && window.chrome.webview); }
+function sendWarp(x, y){
+  try { if(hasShell()) window.chrome.webview.postMessage("warp:" + Math.round(x) + "," + Math.round(y)); } catch(e){}
+}
+function requestCursor(){
+  if(!hasShell()) return false;
+  try { window.chrome.webview.postMessage("cursor?"); return true; } catch(e){ return false; }
+}
+// 嘴的位置：脸的下方偏前（指针就叼在这儿）
+function petMouth(p){
+  const b = PET_BOX[p.sp] || PET_BOX.cat;
+  const s = 1.25 * petScale * (STAGE_SCALE[petStage(p)] || 1);
+  const cx = W * p.x, base = petYFor(p) - 8 - p.lift - p.air;
+  return { x: cx + p.dir * 26 * s, y: base - 44 * s };
+}
+function maybeStealCursor(){
+  if(grab || grabPending) return;
+  if(Date.now() < grabNextAt) return;
+  if(!hasShell() || draggingPet) return;
+  const cand = pets.filter(p => !p.trip && !p.soc && !p.climb
+                             && p.beh.kind !== "sleep" && (p.y == null ? 1 : p.y) > .8);
+  if(!cand.length) return;
+  // 不是每次都干：先问一下指针在哪儿、你闲了多久
+  grabNextAt = Date.now() + 90000 + Math.random() * 120000;
+  grabPending = requestCursor();
+  setTimeout(()=>{ grabPending = false; }, 1200);
+}
+function tryStartGrab(){
+  grabPending = false;
+  const ci = lastCursorInfo;
+  if(!ci || Date.now() - ci.t > 1800) return;
+  if(ci.idle < 20000) return;                        // 人还在用电脑（或者正在读东西），别捣乱
+  if(ci.y < H * 0.42) return;                        // 指针在高处，够不着
+  const cand = pets.filter(p => !p.trip && !p.soc && !p.climb
+                             && p.beh.kind !== "sleep" && (p.y == null ? 1 : p.y) > .8);
+  if(!cand.length) return;
+  // 挑离指针最近的那只
+  const p = cand.reduce((a, b) =>
+    Math.abs(W * a.x - ci.x) < Math.abs(W * b.x - ci.x) ? a : b);
+  if(Math.abs(W * p.x - ci.x) > 460) return;          // 太远就不追了
+  grab = { p, phase:"approach", t0: Date.now(), cx: ci.x, cy: ci.y };
+  try { window.petHub.trace("grab approach px=" + Math.round(W*p.x) + " cx=" + Math.round(ci.x)); } catch(_){}
+  grabNextAt = Date.now() + 240000 + Math.random() * 360000;
+  p.beh = { kind:"walk", until: now() + 14 };
+  bindActive(pets.indexOf(p));
+}
+function endGrab(ok){
+  const p = grab && grab.p;
+  grab = null;
+  try { window.petHub.trace("grab end ok=" + ok); } catch(_){}
+  try { if(hasShell()) window.chrome.webview.postMessage("release"); } catch(e){}
+  if(p && pets.includes(p)){
+    p.beh = { kind:"idle", until: now() + 2 };
+    say(ok ? T().lines.grabDrop : T().lines.grabLost, T().lines.grabTag, p);
+  }
+  reportRects(true);
+  saveState();
+}
+function updateGrabCursor(){
+  const g = grab;
+  if(!g) return;
+  const p = g.p;
+  if(!pets.includes(p)){ grab = null; try { if(hasShell()) window.chrome.webview.postMessage("release"); } catch(e){} return; }
+  const m = petMouth(p);
+  if(g.phase === "snatch"){
+    // 320ms 拽到嘴边：像"被叼住"，而不是指针凭空瞬移
+    g.cx += (m.x - g.cx) * .3;
+    g.cy += (m.y - g.cy) * .3;
+    sendWarp(g.cx, g.cy);
+    if(Date.now() - g.t0 > 340){
+      g.phase = "carry"; g.t0 = Date.now();
+      g.holdUntil = Date.now() + 2200 + Math.random() * 2000;
+      say(T().lines.grabBite, T().lines.grabTag, p);
+      try { window.petHub.trace("grab carry mouth=" + Math.round(m.x) + "," + Math.round(m.y)); } catch(_){}
+      p.beh = { kind:"walk", until: now() + 8 };
+    }
+  } else if(g.phase === "carry"){
+    sendWarp(m.x, m.y);
+    g.cx = m.x; g.cy = m.y;
+    if(Date.now() > g.holdUntil) endGrab(true);
+  }
+}
+
+// ---------------- 前后层：宠物可以站在窗口前面，也可以躲到桌面层 ----------------
+// 前置＝永远置顶；后置＝压在普通窗口下面，点开别的应用就看不见它（桌面还在）
+let petLayer = (typeof window.petHubLayer === "string" && window.petHubLayer === "back") ? "back" : "front";
+function toggleLayer(){
+  const back = petLayer !== "back";
+  petLayer = back ? "back" : "front";
+  try { if(window.petHub && window.petHub.setLayer) window.petHub.setLayer(back); } catch(e){}
+  say(back ? T().lines.layerToBack : T().lines.layerToFront, T().lines.layerTag);
+}
+if(window.chrome && window.chrome.webview)
+  window.chrome.webview.addEventListener("message", e=>{
+    const m = e && e.data;
+    if(m === "layer:back") petLayer = "back";
+    else if(m === "layer:front") petLayer = "front";
+    else if(m === "grab:lost"){ if(grab) endGrab(false); }
+    else if(typeof m === "string" && m.startsWith("cursor:")){
+      const a = m.slice(7).split(",").map(Number);
+      lastCursorInfo = { x: a[0], y: a[1], idle: a[2] || 0, t: Date.now() };
+      if(grabPending) tryStartGrab();
+    }
+  });
+
+// 双击宠物＝切换前后层（比往右键菜单里再堆一项更顺手）
+cv.addEventListener("dblclick", e=>{
+  if(dragMovedFar) return;                 // 刚拖过一场，别把"松手"当成双击
+  if(hitPet(e.clientX, e.clientY) < 0) return;
+  toggleLayer();
+});
+
+// ---------------- 拖拽：拎起宠物（拖到屏幕外面＝把它放走了） ----------------
+let dragMovedFar = false;
+let dragTrack = 0;             // 本次拖拽累计水平位移（松手后据此定朝向）
+let lastHeldSay = 0;
+// 拖拽跟手诊断：只有 PETHUB_DBG=1 启动时才写日志，正常使用零输出。
+const DRAG_DBG = !!window.PETHUB_DBG;
+let dragDbgLast = 0;
+function dragDbg(s){ try { if(DRAG_DBG && window.petHub && window.petHub.trace) window.petHub.trace(s); } catch(e){} }
+// 基准高度已经贴到天花板（y=0）之后，还能再往上拎多少。
+// 以前这个上限是按"宠物当前高度"算的，于是站在高处的宠物往上拖两下就顶死了，
+// 往下拖更是一点都动不了（lift 不能为负）—— 那堵"看不见的墙"就是这么来的。
+function dragLiftMax(p){
+  const b = PET_BOX[p.sp] || PET_BOX.cat;
+  const s = 1.25 * petScale * (STAGE_SCALE[petStage(p)] || 1);
+  // 头顶 = 脚底 + b[1]*s（b[1] 是负的，往上）。让它最多越出屏幕顶边 30px
+  return Math.max(70, 30 - (TOP_Y() - 8) - b[1] * s);
+}
+// 脚底在屏幕上的绝对纵坐标：y=0 贴天花板，y=1 站地面
+const FOOT_TOP  = () => TOP_Y() - 8;
+const FOOT_BASE = () => GROUND() - 8;
+cv.addEventListener("mousedown", e=>{
+  const who = hitPet(e.clientX,e.clientY);
+  if(e.button!==0 || who < 0) return;
+  if(dragCleanup) dragCleanup();              // 上一次没收到 mouseup 就先收尾，避免挂上第二套监听互相打架
+  bindActive(who);
+  const target = pets[who];
+  if(!target) return;
+  draggingPet = true; dragMovedFar = false; kickWarned = false;
+  dragWho = target.id; dragTrack = 0;
+  target.air = 0;                 // 拎起来就落地为零，命中框和画面对得上
+  // —— 抓取点锁定 ——
+  // 全程按"指针位移增量"算，不做任何"把宠物对齐到指针"的换算。
+  // 以前纵向写的是 lift = petYFor - 8 - clientY（脚底对准指针），一按下宠物就整体往下跳：
+  // 你捏的是它脑袋，它却把脚挪到你指尖，差出一百多像素，怎么拖都觉得"没跟手"。
+  // 现在按下那一刻的相对位置原样保留，宠物就是被捏住的那一块，1:1 跟手。
+  const gx = e.clientX, gy = e.clientY;
+  const gpx = target.x, glift = target.lift;
+  // 正挂在墙上（被扔到天花板后往下爬）时，高度由爬墙逻辑独占，拖它没反应。
+  // 手一抓上去就让它脱手，交还给指针。
+  if(target.climb){ target.climb = null; target.beh = { kind:"idle", until: now()+2 }; }
+  const lmax = dragLiftMax(target);
+  // 起始脚底（屏幕绝对坐标）。纵向全程按这个值的位移增量走，
+  // 先落在基准高度 y 上，顶到天花板之后多出来的才交给 lift。
+  const startFoot = petYFor(target) - 8 - target.lift;
+  const footMin = FOOT_TOP() - lmax, footMax = FOOT_BASE();
+  if(DRAG_DBG) dragDbg("DRAG start gx=" + Math.round(gx) + " gy=" + Math.round(gy)
+    + " petcx=" + Math.round(gpx * W) + " glift=" + Math.round(glift)
+    + " lmax=" + Math.round(lmax) + " W=" + W + " H=" + H);
+  const place = (cx, cy)=>{
+    dragTrack = cx - gx;
+    // 允许拖到屏幕外面一点：越过边缘松手就当它走了
+    target.x = Math.max(-.07, Math.min(1.07, gpx + dragTrack / W));
+    // 纵向：脚底跟着手走。先动"站在哪一层"（y），层到底了（贴天花板）再往上拎（lift）。
+    // 这样从半空一路拖回地面是连续的，不会在中途卡住。
+    const foot = Math.max(footMin, Math.min(footMax, startFoot + (cy - gy)));
+    const span = GROUND() - TOP_Y();
+    if(foot <= FOOT_TOP()){
+      target.y = 0;
+      target.lift = Math.min(lmax, FOOT_TOP() - foot);
+    } else {
+      target.y = Math.min(1, (foot - FOOT_TOP()) / span);
+      target.lift = 0;
+    }
+    // ty 不跟着走的话，松手后行为机会把高度平滑拉回旧目标，等于白拖
+    target.ty = target.y;
+    // 同步一份到投影变量，这一帧的绘制/气泡位置立刻跟上
+    if(pets[activeIdx] === target){ px = target.x; petLift = target.lift; }
+    // ox / oy = 指针相对"宠物中心 / 宠物脚底"的偏移。拖拽全程它俩必须是个常数，
+    // 一旦开始漂移就说明宠物没跟着手走（这条日志就是判断"跟不跟手"的硬指标）。
+    if(DRAG_DBG){
+      const nw = Date.now();
+      if(nw - dragDbgLast > 70){
+        dragDbgLast = nw;
+        dragDbg("DRAG ox=" + Math.round(cx - W*target.x)
+              + " oy=" + Math.round(cy - (petYFor(target) - 8 - target.lift))
+              + " lift=" + Math.round(target.lift) + " x=" + target.x.toFixed(4)
+              + " y=" + (target.y == null ? 1 : target.y).toFixed(4));
+      }
+    }
+  };
+  const move = ev=>{
+    if(!draggingPet) return;
+    place(ev.clientX, ev.clientY);
+    if(!dragMovedFar && (Math.abs(dragTrack) > 6 || Math.abs(ev.clientY - gy) > 6)) dragMovedFar = true;
+    // 拖拽期间**不碰朝向**：竖着拎时水平位移在 0 附近抖 ±1px，每帧翻面会让身体左右跳
+    //（尾巴/喙左右不对称，视觉上能跳几十像素）。朝向只在松手时按总位移定一次。
+    if(target.lift > 150 && Date.now() - lastHeldSay > 6000){
+      lastHeldSay = Date.now();
+      say(target.sp === "cat" ? T().lines.heldHighCat : T().lines.heldHigh, null, target);
+    }
+    // 快到边上了先警告一次，免得一松手就没了
+    if(!kickWarned && (target.x < .045 || target.x > .955)){
+      kickWarned = true;
+      say(T().lines.kickWarn, T().lines.kickedTag, target);
+    }
+  };
+  const stop = ()=>{
+    draggingPet = false;
+    dragWho = null;
+    removeEventListener("mousemove",move);
+    removeEventListener("mouseup",up);
+    removeEventListener("blur",up);
+    if(dragCleanup === stop) dragCleanup = null;
+  };
+  const up = (ev)=>{
+    if(!draggingPet) return;
+    // 抬手那一瞬再按抬起点校正一次：甩得快时最后一个 mousemove 可能还停在半路，
+    // 不校正就会"扔上去了却没抓住"。
+    if(ev && typeof ev.clientY === "number" && typeof ev.clientX === "number")
+      place(ev.clientX, ev.clientY);
+    stop();
+    // pdx 是手的水平位移，petdx 是宠物实际平移量，两者应该相等（除拖到屏幕边缘被夹住）
+    if(DRAG_DBG) dragDbg("DRAG end pdx=" + Math.round(dragTrack)
+      + " petdx=" + Math.round((target.x - gpx) * W)
+      + " petdy=" + Math.round(target.lift - glift)
+      + " lift=" + Math.round(target.lift));
+    if(Math.abs(dragTrack) > 26) target.dir = dragTrack > 0 ? 1 : -1;
+    // 拖出屏幕边缘：它自己走掉了，不会再回来
+    if(target.x <= .015 || target.x >= .985){ kickOut(target); return; }
+    // 拖到天花板附近松手：它一把抓住顶边，再顺墙爬下来
+    if(dragMovedFar && headTopOf(target, target.lift) < TOP_Y() + 34){
+      target.lift = 0;
+      startClimb(target);
+      bindActive(pets.indexOf(target));
+      return;
+    }
+    if(dragMovedFar){
+      target.beh = {kind:"idle", until: now()+2};
+      target.st.mood = Math.min(100, target.st.mood + (target.lift > 100 ? -2 : 1));
+      if(target.lift > 100)
+        setTimeout(()=>say(target.sp === "cat" ? T().lines.droppedCat : T().lines.dropped, null, target), 600);
+    }
+    bindActive(pets.indexOf(target));
+    reportRects(true);
+  };
+  dragCleanup = stop;
+  addEventListener("mousemove",move); addEventListener("mouseup",up);
+  addEventListener("blur",up);       // 焦点丢了（切窗口/被别的程序抢走）也要收手，否则会一直黏着
+  e.preventDefault();
+});
+
+// 被拖出屏幕：放它走（永久离开，不会自己回来）
+function kickOut(p){
+  if(!p) return;
+  const idx = pets.indexOf(p);
+  if(idx < 0) return;
+  const nm = spNameOf(p);
+  pets.splice(idx, 1);
+  graveyard.push({ sp:p.sp, born:p.born, died:Date.now(), reason:"kicked" });
+  if(p.soc){
+    const mate = pets.find(x => x.id === p.soc.with);
+    if(mate){ mate.soc = null; if(mate.beh.kind === "social") mate.beh = { kind:"idle", until: now()+1 }; }
+    p.soc = null;
+  }
+  if(activeIdx >= pets.length) activeIdx = Math.max(0, pets.length - 1);
+  if(pets.length) bindActive(activeIdx);
+  say(T().lines.kicked(nm), T().lines.kickedTag);
+  toast(`<b>🚪</b> ${T().lines.kicked(nm)}`);
+  reportRects(true);
+  saveState();
+}
+
+// ---------------- 拖拽：HUD 面板与 mini 圆钮 ----------------
+function makeDraggable(target, handle, storeKey){
+  handle.addEventListener("mousedown", e=>{
+    if(e.button!==0) return;
+    e.stopPropagation();
+    const r = target.getBoundingClientRect();
+    const sx=e.clientX, sy=e.clientY, ox=r.left, oy=r.top;
+    let moved=false;
+    const move = ev=>{
+      const dx=ev.clientX-sx, dy=ev.clientY-sy;
+      if(!moved && Math.hypot(dx,dy)<5) return;
+      moved=true;
+      target.style.left = Math.max(0, Math.min(innerWidth-40, ox+dx))+"px";
+      target.style.top  = Math.max(0, Math.min(innerHeight-40, oy+dy))+"px";
+      target.style.right = "auto";
+    };
+    const up = ()=>{
+      removeEventListener("mousemove",move); removeEventListener("mouseup",up);
+      if(moved){ hudJustDragged = true; setTimeout(()=>hudJustDragged=false, 200);
+        try{ localStorage.setItem(storeKey,
+        JSON.stringify({left:target.style.left, top:target.style.top})); }catch(_){}}
+    };
+    addEventListener("mousemove",move); addEventListener("mouseup",up);
+    e.preventDefault();
+  });
+}
+function restorePos(target, storeKey){
+  try{
+    const p = JSON.parse(localStorage.getItem(storeKey)||"null");
+    if(p && p.left && p.top){ target.style.left=p.left; target.style.top=p.top; target.style.right="auto"; }
+  }catch(_){}
+}
+restorePos(el("hud"), "pethub_hud_pos");
+makeDraggable(el("hud"), el("hudHead"), "pethub_hud_pos");
+makeDraggable(el("hud"), el("hudShow"), "pethub_hud_pos");
+placeHudPanel();
+addEventListener("resize", ()=>{ placeHudPanel(); if(el("bubble").classList.contains("show")) placeBubble(); });
+
+cv.addEventListener("contextmenu", e=>{
+  e.preventDefault();
+  const pi = hitPoop(e.clientX,e.clientY);
+  if(pi>=0){ cleanPoop(pi); return; }
+  const who = hitPet(e.clientX,e.clientY);
+  if(who >= 0){ menuPet = pets[who]; bindActive(who); openMenu(e.clientX,e.clientY); }
+  else closeMenu();
+});
+addEventListener("click", e=>{ if(!e.target.closest("#menu")) closeMenu(); });
+
+function cleanPoop(i){
+  const q = poops[i];
+  poops.splice(i,1);
+  ST.hygiene = Math.min(100, ST.hygiene+3);
+  ST.mood = Math.min(100, ST.mood+1);
+  // 扫掉的瞬间冒几粒小灰
+  if(q) for(let k=0;k<4;k++)
+    hearts.push({ x:q.x + Math.random()*24-12, y:GROUND()-12, t0:Date.now(), s:Math.random(), e:"✨" });
+  say(spLine("clean"), T().lines.cleanedTag);
+  reportRects(true);
+}
+
+function actions(){
+  const A = T().actions, L = T().lines, S = T().stats;
+  const raw = [
+    [A.feed, ()=>{ ST.satiety=Math.min(100,ST.satiety+42);
+        poopCooldown = 18 + Math.random()*20;
+        say(Math.random()<.5 ? L.feed : L.thanks, S.satiety+" "+Math.round(ST.satiety)); }],
+    [A.pet, ()=>{ ST.mood=Math.min(100,ST.mood+6);
+        for(let i=0;i<4;i++) hearts.push({x:petX()+Math.random()*60-30, y:petY()-80, t0:Date.now(), s:Math.random()});
+        say(spLine("pet"), S.mood+" "+Math.round(ST.mood)); }],
+    [A.play, ()=>{ if(ST.energy<12){ say(L.tooTired); return; }
+        ST.mood=Math.min(100,ST.mood+7); ST.energy=Math.max(0,ST.energy-9);
+        behavior={kind:"play", until:now()+4};
+        say(spLine("play")); }],
+    [A.bath, ()=>{ ST.hygiene=100; poops=poops.slice(0,Math.ceil(poops.length/2));
+        say(spLine("clean"), L.cleanFull); }],
+    [A.sleep, ()=>{ behavior={kind:"sleep", until:now()+10}; say(L.sleep); }],
+    ["SEP"],
+    [A.vet, ()=>{ if(!sick){ say(L.healthy, S.health+" "+Math.round(ST.health)); return; }
+        sick=false; ST.health=100; ST.mood=Math.min(100,ST.mood+10);
+        say(L.recovered, L.recoveryTag); }],
+    ["SEP"],
+    // 多只时用不着"下一只"——右键点谁就是对谁操作（menuTarget 会切回目标）
+    ...(pets.length > 1 ? [] : [[A.swap, ()=>{
+        const ks=Object.keys(SPECIES);
+        cur = ks[(ks.indexOf(cur)+1)%ks.length];
+        if(pets[0]) pets[0].sp = cur;                 // 单只时换的是物种本体
+        poops=[]; sick=false; ST.health=100; ST.satiety=72; ST.energy=80; ST.mood=75; ST.hygiene=88;
+        petAir = 0; _faceCur = ""; setHudFace();           // 小球图案跟着换
+        say(L.switched(spName()), L.switchTag);
+        reportRects(true); }]]),
+    [A.lang, ()=>{ setLang(LANG === "zh" ? "en" : "zh"); }],
+  ];
+  // 去掉多余的空分隔：连续的两个、开头的、末尾的都清掉
+  const items = [];
+  for(const it of raw){
+    const isSep = it === "SEP" || (Array.isArray(it) && it[0] === "SEP");
+    if(isSep){
+      if(!items.length || items[items.length-1] === "SEP") continue;
+      items.push("SEP"); continue;
+    }
+    items.push(it);
+  }
+  while(items.length && items[items.length-1] === "SEP") items.pop();
+  return items.map(it => (Array.isArray(it) && typeof it[1] === "function")
+    ? [it[0], () => { menuTarget(); it[1](); }] : it);
+}
+
+// ---------------- 语言切换（UI + 台词 + 状态文案 全部同时切） ----------------
+function setLang(l){
+  LANG = (l === "en") ? "en" : "zh";
+  try { if(window.petHub && window.petHub.setLang) window.petHub.setLang(LANG); } catch(e){}
+  applyLang();
+}
+function applyLang(){
+  const u = T().ui;
+  const t = document.querySelector("#hud .hud-head .t"); if(t) t.textContent = u.hudTitle;
+  const c = el("hudHide"); if(c) c.textContent = u.collapse;
+  if(!bridgeOnline) el("noteLine").textContent = u.demo;
+  _faceCur = ""; setHudFace();
+  renderHUD();
+  say(T().lines.greeting, spName());
+}
+
+function openMenu(x,y){
+  const m = el("menu");
+  m.innerHTML = actions().map(a=> a[0]==="SEP" ? `<div class="sep"></div>` :
+    `<div class="mi">${a[0]}</div>`).join("");
+  const items=[...m.querySelectorAll(".mi")];
+  let ai=0;
+  actions().forEach(a=>{ if(a[0]==="SEP") return; const node=items[ai++]; node.onclick=()=>{ a[1](); closeMenu(); }; });
+  m.style.display="block";
+  // 按菜单真实尺寸夹住位置：项变多了以后，写死 320 会让底部一截跑到屏幕外
+  const mw = m.offsetWidth || 170, mh = m.offsetHeight || 320;
+  m.style.left = Math.max(6, Math.min(innerWidth  - mw - 8, x + 6)) + "px";
+  m.style.top  = Math.max(6, Math.min(innerHeight - mh - 8, y + 6)) + "px";
+  if(window.petHub) window.petHub.setInteractive(true);
+}
+function closeMenu(){
+  el("menu").style.display="none";
+  // 必须复位：否则壳会一直以为"点在菜单上"，把整屏点击全吞掉（那层隐藏的墙）
+  if(window.petHub) window.petHub.setInteractive(false);
+  reportRects(true);
+}
+
+// ---- 再点一次桌面快捷方式：又来一只（不用在菜单里堆选项） ----
+window.pethubCount = function(){ return pets.length; };
+window.pethubSpawn = function(){
+  if(pets.length >= MAX_PETS){ say(T().lines.spawnFull); return; }
+  const ks = Object.keys(SPECIES);
+  const sp = ks[Math.floor(Math.random()*ks.length)];
+  const p = spawnPet(sp, Math.max(.1, Math.min(.9, (pets.length ? pets[pets.length-1].x : .5) + (Math.random()*.3-.15))));
+  if(!p) return;
+  activeIdx = pets.indexOf(p);
+  bindActive(activeIdx);
+  for(let i=0;i<6;i++)
+    hearts.push({x:petX()+Math.random()*60-30, y:petY()-80, t0:Date.now(), s:Math.random()});
+  say(T().lines.spawnNew(SPECIES[sp].name));
+  flushActive();
+  reportRects(true);
+  setHudFace();
+};
+
+// ---- 同步命中矩形：把可交互区域直接交给壳做本地判定 ----
+// 之前只靠 setInteractive 单向声明，菜单关闭后忘了复位就会永久卡在"全屏拦截"。
+// 现在页面每 200ms（或有变化时）把真实矩形告诉壳，点击判定纯本地、同步、无状态残留。
+let lastRectSig = "";
+window.pethubRects = function(){
+  const out = [];
+  const add = (tag, b) => {
+    if(b.width > 1 && b.height > 1)
+      out.push(tag + ":" + Math.round(b.left) + "," + Math.round(b.top)
+               + "," + Math.round(b.width) + "," + Math.round(b.height));
+  };
+  // HUD 只上报"真正看得见的那块"：
+  // 展开 → 面板本身；收起 → 那颗小球。以前上报的是 #hud 外层盒子（宽度等于面板宽），
+  // 收起后右侧会留出一大片隐形却吞点击的区域。
+  const hud = el("hud");
+  if(hud && !hud.classList.contains("hidden")){
+    const panel = hud.querySelector(".hud-panel");
+    if(panel) add("hud", panel.getBoundingClientRect());
+  } else if(hud){
+    const ball = el("hudShow");
+    if(ball) add("hud", ball.getBoundingClientRect());
+  }
+  for(const id of ["menu"]){
+    const e = el(id); if(!e) continue;
+    if(e.style.display === "none") continue;
+    add(id, e.getBoundingClientRect());
+  }
+  // 气泡是 pointer-events:none 的纯展示元素，不该拦住桌面点击 → 不上报
+  pets.forEach(p => { if(!(p.trip && p.trip.phase === "away")) add("P", petBoxFor(p)); });
+  eggs.forEach(e => out.push("D:" + Math.round(W*e.x - 26) + ","
+           + Math.round(GROUND()+2 - 54) + ",52,60"));
+  poops.forEach(p => out.push("D:" + Math.round(p.x-28) + ","
+           + Math.round(GROUND()+2-28) + ",56,56"));
+  return out.join(";");
+};
+function reportRects(force){
+  if(!(window.petHub && window.petHub.setRects)) return;
+  const sig = window.pethubRects();
+  if(!force && sig === lastRectSig) return;      // 没变化就不发，几乎零开销
+  lastRectSig = sig;
+  window.petHub.setRects(sig);
+}
+setInterval(()=>reportRects(false), 120);
+
+// 运行期异常上报（只在 PETHUB_TRACE_CLICK=1 时落盘）：raF 里一旦抛错，画面会整个冻住
+window.addEventListener("error", function(e){
+  try {
+    if(window.petHub && window.petHub.trace)
+      window.petHub.trace("JSERR " + e.message + " @" + (e.lineno||"?") + ":" + (e.colno||"?"));
+  } catch(_){}
+});
+
+// 走动的宠物 120ms 一同步，点下去不会落在已经走开的空位上
+let _faceCur = "";
+function updateMenuBadge(){
+  // 小球右上角的角标：有几个任务在等你
+  const b = el("hudBadge");
+  if(b){
+    let wait = 0; TASKS.forEach(t => { if(t.status === "waiting") wait++; });
+    b.textContent = wait > 9 ? "9+" : String(wait);
+    b.classList.toggle("on", wait > 0);
+  }
+  // 小球图案 = 当前宠物（只在真的换了才写 DOM）
+  if(_faceCur !== cur){ _faceCur = cur; setHudFace(); }
+}
+let hudJustDragged = false;
+
+// HUD 头部点击 → 收起/展开
+// 收起后是"当前宠物的小球"；展开方向按球在屏幕左右哪半边决定（贴右边就向左长，贴左边就向右长）
+function hudPanelW(){ return Math.round(Math.max(240, Math.min(380, W * 0.20))); }
+function placeHudPanel(){
+  const hud = el("hud"); if(!hud || hud.classList.contains("hidden")) return;
+  const r = hud.getBoundingClientRect();
+  const pw = hudPanelW();
+  const canRight = r.left + pw + 8 <= W;
+  const canLeft  = r.right - pw - 8 >= 0;
+  let side;
+  if(canRight && !canLeft)      side = "hud-left";
+  else if(canLeft && !canRight) side = "hud-right";
+  else                          side = (r.left < W/2) ? "hud-left" : "hud-right";
+  hud.classList.toggle("hud-left",  side === "hud-left");
+  hud.classList.toggle("hud-right", side === "hud-right");
+}
+function setHudFace(){
+  const f = el("hudFace"); if(f) f.textContent = PET_FACE[cur] || "🐾";
+  document.documentElement.style.setProperty("--pet-accent", (SPECIES[cur] || {}).accent || "#7fa6d0");
+  const btn = el("hudShow"); if(btn) btn.title = spName();
+}
+function collapseHud(){
+  hudHidden = true;
+  el("hud").classList.add("hidden");
+  reportRects(true);
+}
+function expandHud(){
+  hudHidden = false;
+  el("hud").classList.remove("hidden");
+  placeHudPanel();
+  reportRects(true);
+}
+el("hudHide").onclick = e=>{ e.stopPropagation(); collapseHud(); };
+el("hudShow").onclick = ()=>{ if(hudJustDragged) return; expandHud(); };
+el("hudShow").addEventListener("mouseenter", ()=>{ if(window.petHub) window.petHub.setInteractive(true); });
+el("hudHead").addEventListener("mouseenter", ()=>{ if(window.petHub) window.petHub.setInteractive(true); });
+el("hud").addEventListener("mouseleave", ()=>{ if(window.petHub) window.petHub.setInteractive(false); });
+
+// ---------------- 启动 ----------------
+// Electron(preload) 与 WebView2 壳都算悬浮模式，不加底色；仅浏览器预览加底色和说明
+const floatingShell = !!window.petHub || !!wvHost;
+if(!floatingShell){ document.body.classList.add("browser");
+  el("noteLine").style.display = ""; }
+// 醒来：先读档（多只宠物 + 蛋），再结算离线时间
+let savedVer = 0;
+try {
+  if(window.petHubState){
+    const sv = JSON.parse(window.petHubState);
+    savedVer = sv.ver || 1;
+    if(Array.isArray(sv.pets) && sv.pets.length){
+      pets = sv.pets.filter(o => o && SPECIES[o.sp]).map(o => {
+        const p = newPet(o.sp, o.x);
+        p.id = o.id || p.id;
+        p.born = o.born || p.born;
+        p.dir = o.dir || 1;
+        if(o.st) Object.assign(p.st, o.st);
+        p.sick = !!o.sick; p.sickSince = o.sickSince || 0;
+        if(typeof o.temper === "number") p.temper = o.temper;
+        p.beh = {kind:"idle", until:0};
+        return p;
+      });
+    } else if(sv.cur && SPECIES[sv.cur]){
+      // 老版本单只存档：迁移成一只成年宠物
+      const p = newPet(sv.cur, .5);
+      if(sv.ST) Object.assign(p.st, sv.ST);
+      p.sick = !!sv.sick;
+      p.born = Date.now() - LIFE.baby*60000 - LIFE.young*60000 - 60000;   // 直接按成年算
+      pets = [p];
+    }
+    if(Array.isArray(sv.eggs)) eggs = sv.eggs.filter(e => e && e.hatchAt > Date.now());
+    if(Array.isArray(sv.grave)) graveyard = sv.grave.slice(-20);
+    if(Array.isArray(sv.rel)) sv.rel.forEach(r => { if(Array.isArray(r)) relMap.set(r[0], r[1]); });
+  }
+} catch(e){}
+if(!pets.length && !eggs.length) pets = [newPet(Object.keys(SPECIES)[Math.floor(Math.random()*7)], .5)];
+if(pets.length) bindActive(0);
+try { applyAway(window.petHubState ? JSON.parse(window.petHubState) : null); } catch(e){}
+applyLang();            // 启动时按保存的语言刷新全部文案
+setTimeout(()=>{
+  say(awayGreeting(), spName());
+  if(awayInfo){
+    const h = awayInfo.hours.toFixed(awayInfo.hours < 10 ? 1 : 0);
+    toast(`<b>🌙</b> ${T().lines.awayToast(h)} · ` +
+      `${T().stats.satiety} -${awayInfo.dS} · ${T().stats.mood} -${awayInfo.dM}` +
+      (awayInfo.poops ? ` · 💩×${awayInfo.poops}` : ""));
+  }
+}, 1200);
+setInterval(saveState, 60000);      // 每分钟存一次，突然断电也不至于全丢
+setTimeout(()=>{ say(timeLine(), spName()); }, 9000);   // 开机后报一次日期/星期/安装天数
+connectBridge();
+renderHUD();
+setInterval(renderHUD, 30000);        // 每 30 秒刷新文案（静默状态会随事件老化而变化）
+</script>
+</body>
+</html>

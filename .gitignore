@@ -1,0 +1,29 @@
+# Build artifacts
+bin/
+obj/
+publish/
+dist/
+*.exe
+*.zip
+
+# Bundled runtimes (fetched at build/install time, too big for git)
+vendor/
+
+# Python
+__pycache__/
+*.pyc
+
+# Local scratch / test
+.tmp/
+*.log
+*.bmp
+
+# Editor / OS
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Runtime settings (user-local)
+*.WebView2/
