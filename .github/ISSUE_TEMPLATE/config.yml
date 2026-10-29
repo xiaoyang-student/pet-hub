@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 随便聊聊 / 提问 / 晒桌面
+    url: https://github.com/xiaoyang-student/pet-hub/discussions
+    about: 不确定该发什么，或者只是想聊聊 —— 来 Discussions
+  - name: ⭐ 觉得好用？点个 Star 并分享给朋友
+    url: https://github.com/xiaoyang-student/pet-hub
+    about: 这是对这个小作品最大的支持，也能让更多人看到它
+  - name: 🤝 想提交代码？先看贡献指南
+    url: https://github.com/xiaoyang-student/pet-hub/blob/main/CONTRIBUTING.md
+    about: PR 请发到 contrib 分支，我会逐条审核

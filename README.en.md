@@ -42,6 +42,24 @@ runtime and need no administrator rights.
 > or `git revert <commit>` undoes a single change. Both tag `v1.2.0` and branch `backup/v1.2.0`
 > stay on the remote.
 
+---
+
+## 🌟 Like it? Help more people find it
+
+This is a one-person side project — **every small action from you matters**:
+
+- **Star it ⭐** (top right) — the single most useful thing, and how others discover it;
+- **Share it** — if a friend also needs someone watching their AI tools, send them
+  [this link](https://github.com/xiaoyang-student/pet-hub);
+- **Suggest** — something feels off, you want a feature, or your favourite AI app isn't tracked yet:
+  open an [Issue](https://github.com/xiaoyang-student/pet-hub/issues);
+- **Chat** — [Discussions](https://github.com/xiaoyang-student/pet-hub/discussions) for showing off
+  your desktop, asking questions, or tossing in ideas;
+- **Contribute code** — see [CONTRIBUTING.md](CONTRIBUTING.md): send PRs to the **`contrib`** branch;
+  I review each one before it reaches a release.
+
+> A star, a suggestion, a share — that's what keeps it improving. Thank you 🙏
+
 > Repo owner: after publishing a Release, replace `xiaoyang-student/pet-hub` above with your real repository path.
 
 ---

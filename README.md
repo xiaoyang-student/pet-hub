@@ -32,6 +32,23 @@
 > **想回退到旧版？** 每个版本都留了备份：`git checkout backup/v1.2.0` 可直接回到 v1.2.0，
 > 也可用 `git revert <提交号>` 单独撤销某次改动。标签 `v1.2.0` / 分支 `backup/v1.2.0` 都保留在远端。
 
+---
+
+## 🌟 喜欢它？帮我让它被更多人看见
+
+这是我一个人做的小作品，**你的每一次举手之劳都很关键**：
+
+- **点右上角 Star ⭐** —— 最直接的支持，也是它能不能被更多人看到的关键；
+- **分享给朋友** —— 如果你觉得某个朋友也需要有人替他盯着 AI，把
+  [这个链接](https://github.com/xiaoyang-student/pet-hub) 甩给他；
+- **提建议** —— 用着别扭、想要新功能、或者你常用的 AI 还没被跟踪，
+  都欢迎来 [Issues](https://github.com/xiaoyang-student/pet-hub/issues) 说一声；
+- **随手聊聊** —— [Discussions](https://github.com/xiaoyang-student/pet-hub/discussions) 里
+  可以晒你的桌宠、问问题、出点子；
+- **提交代码** —— 看 [CONTRIBUTING.md](CONTRIBUTING.md)：PR 请发到 **`contrib`** 分支，我逐条审核后再合入发布。
+
+> 一个 Star、一句建议、一次分享，都是它继续变好的理由。谢谢你 🙏
+
 > 仓库所有者：发布 Releases 后，把上面链接里的 `xiaoyang-student/pet-hub` 换成你的实际地址即可。
 
 ---

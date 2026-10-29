@@ -1,0 +1,48 @@
+name: 💡 想法 / 建议
+description: 想让它更聪明、更好看、更好用？说吧
+title: "[建议] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        所有建议都会被认真看完。**越具体越容易落地** ——
+        "希望宠物能提醒我休息" 比 "希望更好" 有用得多。
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你的想法
+      placeholder: 例如：任务完成后，宠物能弹出一句"干完了，歇会儿吧"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 你想用它解决什么问题
+      placeholder: 例如：我同时开四个 AI，经常忘了哪个还在跑
+    validations:
+      required: false
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 属于哪一类
+      options:
+        - 桌宠外观 / 动作 / 文案
+        - 状态栏与提醒
+        - AI 追踪能力
+        - 安装 / 设置
+        - 性能与资源占用
+        - 其它
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contrib
+    attributes:
+      label: 参与
+      options:
+        - label: 我愿意帮忙实现（哪怕只是试试）
+        - label: 我可以提供测试/截图/录屏
