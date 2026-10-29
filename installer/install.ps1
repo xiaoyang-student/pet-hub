@@ -1,25 +1,77 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
   PetHub 安装脚本（中文输出）
 
   做四件事：
-    1. 把程序装到 %LOCALAPPDATA%\PetHub
+    1. 把程序装到指定目录（默认 %LOCALAPPDATA%\PetHub，可用 -Dir 改到任意位置）
     2. 注册 MCP 工具服务（让 Qoder / WorkBuddy 等平台能主动上报）
     3. 装上 pethub-notify 技能（教 Agent 在干活时上报）
     4. 开机自启 + 桌面快捷方式
 
-  卸载：运行 uninstall.ps1
+  参数：
+    -Dir <路径>      安装到哪儿（不传则用 %LOCALAPPDATA%\PetHub）
+    -NoAutoStart     不设置开机自启
+    -NoShortcut      不创建桌面快捷方式
+
+  用法：
+    powershell -ExecutionPolicy Bypass -File install.ps1
+    powershell -ExecutionPolicy Bypass -File install.ps1 -Dir "E:\Tools\PetHub"
+
+  卸载：运行 uninstall.ps1（它会从注册表 InstallLocation 找到真实安装位置，
+        不依赖任何固定路径）
 #>
 [CmdletBinding()]
 param(
+    [string]$Dir = "",           # 安装目录（留空 = 当前用户的默认位置）
     [switch]$NoAutoStart,        # 不设置开机自启
     [switch]$NoShortcut          # 不创建桌面快捷方式
 )
 
 $ErrorActionPreference = "Continue"
 $Src      = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Install  = Join-Path $env:LOCALAPPDATA "PetHub"
 $AppName  = "PetHub 桌面宠物"
+
+# ------------------------------------------------------------------
+# 安装目录：不写死任何盘符/用户目录。
+#   1) -Dir 显式指定 → 用它（清洗引号与尾部斜杠后取绝对路径）
+#   2) 没指定       → %LOCALAPPDATA%\PetHub（当前用户的默认位置）
+#   3) 危险位置（盘符根 / Windows / Program Files / 用户主目录本身）→ 拒绝
+# ------------------------------------------------------------------
+function Resolve-TargetDir {
+    param([string]$given)
+
+    $d = ""
+    if ($given) { $d = $given.Trim().Trim('"').Trim("'").TrimEnd('\', '/') }
+    if (-not $d) {
+        $base = $env:LOCALAPPDATA
+        if (-not $base) { $base = Join-Path $HOME "AppData\Local" }
+        $d = Join-Path $base "PetHub"
+    }
+    try { $d = [System.IO.Path]::GetFullPath($d) } catch { }
+    return $d.TrimEnd('\')
+}
+
+function Test-DirSafe {
+    param([string]$path)
+    if (-not $path) { return $false }
+    if ($path -match '^[A-Za-z]:$') { return $false }        # 盘符根
+    if ($path.Split('\').Count -lt 2) { return $false }      # 至少两级
+    $low = $path.ToLowerInvariant()
+    foreach ($b in @($env:WINDIR, $env:SystemRoot, ${env:ProgramFiles},
+                     ${env:ProgramFiles(x86)}, $env:USERPROFILE, $env:APPDATA,
+                     $env:LOCALAPPDATA, $env:TEMP)) {
+        if (-not $b) { continue }
+        if ($low -eq $b.TrimEnd('\').ToLowerInvariant()) { return $false }
+    }
+    return $true
+}
+
+$Install = Resolve-TargetDir $Dir
+if (-not (Test-DirSafe $Install)) {
+    Write-Host "拒绝安装到 $Install —— 该位置不安全（盘符根 / 系统目录 / 用户主目录）。" -ForegroundColor Red
+    Write-Host "请用 -Dir 指定一个普通文件夹，例如 -Dir `"$env:LOCALAPPDATA\PetHub`"" -ForegroundColor Yellow
+    exit 1
+}
 
 function Say($msg, $color = "Cyan") { Write-Host $msg -ForegroundColor $color }
 
@@ -73,14 +125,26 @@ if ($py) {
     )
     foreach ($f in $targets) {
         if (-not (Test-Path (Split-Path -Parent $f))) { continue }
-        $cfg = @{}
+        # 注意：ConvertFrom-Json -AsHashtable 是 PowerShell 6+ 才有的参数，
+        # Windows 自带的 5.1 上会直接报错，以前会把用户已有的 mcpServers 全清掉。
+        # 这里改成 5.1 / 7 都通用的写法，只往里加 pethub，其它服务原样保留。
+        $cfg = $null
         if (Test-Path $f) {
-            try { $cfg = Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } catch { $cfg = @{} }
-            Copy-Item $f "$f.pethub-backup" -Force -ErrorAction SilentlyContinue
+            try { $cfg = Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $cfg = $null }
+            if ($cfg) { Copy-Item $f "$f.pethub-backup" -Force -ErrorAction SilentlyContinue }
         }
-        if (-not $cfg.ContainsKey("mcpServers")) { $cfg["mcpServers"] = @{} }
-        $cfg["mcpServers"]["pethub"] = $srv
-        ($cfg | ConvertTo-Json -Depth 6) | Set-Content $f -Encoding UTF8
+        if (-not $cfg) { $cfg = [pscustomobject]@{} }
+        if (-not ($cfg.PSObject.Properties.Name -contains "mcpServers")) {
+            $cfg | Add-Member -MemberType NoteProperty -Name "mcpServers" -Value ([pscustomobject]@{})
+        }
+        $servers = $cfg.mcpServers
+        if ($servers -is [System.Collections.IDictionary]) {
+            $servers["pethub"] = $srv
+        } else {
+            $servers | Add-Member -MemberType NoteProperty -Name "pethub" `
+                                  -Value ([pscustomobject]$srv) -Force
+        }
+        ($cfg | ConvertTo-Json -Depth 8) | Set-Content $f -Encoding UTF8
         Say "      ✓ $f"
     }
 } else {
@@ -101,7 +165,7 @@ if (Test-Path $skillSrc) {
 Say "[5/5] 开机自启与快捷方式"
 $exe = Join-Path $Install "PetHubLight.exe"
 if (-not $NoAutoStart -and (Test-Path $exe)) {
-    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PetHub" -Value $exe
+    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PetHub" -Value ('"' + $exe + '"')
     Say "      ✓ 开机自启"
 }
 if (-not $NoShortcut -and (Test-Path $exe)) {
@@ -115,6 +179,22 @@ if (-not $NoShortcut -and (Test-Path $exe)) {
     } catch { Say "      ! 快捷方式创建失败：$_" "Yellow" }
 }
 
+# ---------- 5.5 装卸载入口（卸载逻辑统一在 uninstall.ps1） ----------
+$unSrc = Join-Path $Src "uninstall.ps1"
+if (Test-Path $unSrc) {
+    Copy-Item $unSrc (Join-Path $Install "uninstall.ps1") -Force
+}
+# .cmd 只做壳：内容全 ASCII，避免编码问题；真正逻辑在 PetHubLight.exe --uninstall
+$cmdBody = @'
+@echo off
+rem PetHub uninstaller entry.
+rem The real uninstall logic is built into PetHubLight.exe --uninstall,
+rem which is also the UninstallString registered in Apps & features.
+"%~dp0PetHubLight.exe" --uninstall
+exit /b %ERRORLEVEL%
+'@
+try { Set-Content -Path (Join-Path $Install "卸载 PetHub.cmd") -Value $cmdBody -Encoding ASCII } catch { }
+
 # ---------- 6. 登记到 Windows「已安装的应用」（设置里能看到、能标准卸载） ----------
 $arp = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PetHub"
 $bytes = (Get-ChildItem -Path $Install -Recurse -File -ErrorAction SilentlyContinue |
@@ -122,10 +202,11 @@ $bytes = (Get-ChildItem -Path $Install -Recurse -File -ErrorAction SilentlyConti
 if (-not $bytes) { $bytes = 0 }
 New-Item -Path $arp -Force -ErrorAction SilentlyContinue | Out-Null
 New-ItemProperty -Path $arp -Name "DisplayName"     -Value "PetHub 桌宠"              -PropertyType String -Force | Out-Null
-New-ItemProperty -Path $arp -Name "DisplayVersion"  -Value "1.0"                     -PropertyType String -Force | Out-Null
+New-ItemProperty -Path $arp -Name "DisplayVersion"  -Value "1.2.1"                   -PropertyType String -Force | Out-Null
 New-ItemProperty -Path $arp -Name "Publisher"       -Value "PetHub Contributors"     -PropertyType String -Force | Out-Null
 New-ItemProperty -Path $arp -Name "InstallLocation" -Value $Install                     -PropertyType String -Force | Out-Null
-New-ItemProperty -Path $arp -Name "UninstallString" -Value "$Install\卸载 PetHub.cmd"   -PropertyType String -Force | Out-Null
+New-ItemProperty -Path $arp -Name "UninstallString" -Value "`"$exe`" --uninstall"      -PropertyType String -Force | Out-Null
+New-ItemProperty -Path $arp -Name "QuietUninstallString" -Value "`"$exe`" --uninstall --silent" -PropertyType String -Force | Out-Null
 New-ItemProperty -Path $arp -Name "DisplayIcon"     -Value "$Install\PetHubLight.exe"   -PropertyType String -Force | Out-Null
 New-ItemProperty -Path $arp -Name "EstimatedSize"   -Value ([int][Math]::Min([int]::MaxValue, $bytes / 1KB)) -PropertyType DWord -Force | Out-Null
 New-ItemProperty -Path $arp -Name "NoModify"        -Value 1 -PropertyType DWord -Force | Out-Null

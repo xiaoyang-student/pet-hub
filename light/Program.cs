@@ -3,6 +3,7 @@
 // 这是 WebView2 官方唯一支持的桌面透明方案（HWND 托管的 TransparencyKey 均不可用）。
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -240,6 +241,14 @@ static class Program
         // --watch-app <exe>：给安装器/脚本用的"静默导入"。
         // 只写名单不弹界面；已经在跑的那只会在 2 秒内自己发现新条目。
         CurLang = LoadLang();
+        // --uninstall [--silent]：内置卸载器（模仿 WorkBuddy 的 Uninstall exe 模式）。
+        // 注册表「已安装的应用」直接指向本 exe；必须在单实例逻辑之前处理，
+        // 因为卸载时可能有一只宠物正在跑，要先请它退出再清场。
+        if (HasArg(args, "--uninstall"))
+        {
+            RunUninstaller(HasArg(args, "--silent") || HasArg(args, "/S"));
+            return;
+        }
         HandleCliImport(args);
         // --quit：叫已经在跑的那只优雅退出（安装器/卸载脚本用）。
         foreach (var a in args)
@@ -264,6 +273,7 @@ static class Program
         try { Application.SetHighDpiMode(HighDpiMode.PerMonitorV2); } catch { }
         Trace("start (composition)");
         StartBridgeIfNeeded();
+        StartTracerIfNeeded();
         // 通用接入：已经导入过的应用，开机就接着盯（名单在 %LOCALAPPDATA%\PetHub\apps.json）
         LoadApps();
         if (watchedApps.Count > 0) StartAppWatchIfNeeded();
@@ -971,7 +981,7 @@ static class Program
     // ---------------- 设置持久化（语言等） ----------------
     static string SettingsPath()
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PetHub");
+        var dir = DataDir();
         Directory.CreateDirectory(dir);
         return Path.Combine(dir, "settings.json");
     }
@@ -1126,9 +1136,102 @@ static class Program
         return "about:blank";
     }
 
-    // 安装目录：%LOCALAPPDATA%\PetHub（install.ps1 会把文件放这里）
-    static string InstallDir() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PetHub");
+    // ---------------- 路径：一律运行时解析，不写死任何盘符/目录 ----------------
+    // 安装位置是不确定的：安装器默认放 %LOCALAPPDATA%\PetHub，用户也可以用
+    // -Dir 装到 E:\Tools\PetHub 之类任意地方，或者直接解压来用。所以：
+    //   * 程序资源（app / bridge / runtime / connectors）——以"自己的 exe 在哪"为准；
+    //   * 数据（存档 / apps.json / settings.json）——按下面的证据链解析。
+    static string NormalizeDir(string p)
+    {
+        if (string.IsNullOrWhiteSpace(p)) return "";
+        try
+        {
+            var full = Path.GetFullPath(p.Trim().Trim('"')).TrimEnd('\\', '/');
+            if (full.Length <= 3) return "";        // C:\ 这种盘符根不认
+            return full;
+        }
+        catch { return ""; }
+    }
+
+    // 追踪器的运行时目录：必须和 agent-trace/trace.py 的 _runtime_dir() 一致
+    // （那边 LOCALAPPDATA 缺失时也会按 ~\AppData\Local 兜底，这里同步处理，
+    //   否则两边算出的目录不同，桌宠会误判追踪器没在跑而反复拉起）
+    static string TraceRuntimeDir()
+    {
+        var local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(local))
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(home))
+            {
+                var cand = Path.Combine(home, "AppData", "Local");
+                local = Directory.Exists(cand) ? cand : home;
+            }
+        }
+        return string.IsNullOrWhiteSpace(local) ? "" : Path.Combine(local, "agent-trace");
+    }
+
+    // 旧版本/默认安装时的数据位置，只作兜底
+    static string LegacyDataDir()
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return string.IsNullOrEmpty(local) ? "" : Path.Combine(local, "PetHub");
+    }
+
+    // 程序资源目录 = 自己的 exe 所在目录。
+    // 以前写死 %LOCALAPPDATA%\PetHub，用户装到别的目录就找不到 app/index.html、
+    // bridge/server.py、runtime/python 了。现在以自身位置为准，
+    // 只有自身目录里确实没有资源时才回退旧位置（兼容老安装）。
+    static string InstallDir()
+    {
+        string self = AppContext.BaseDirectory;
+        string[] marks = { "app", "bridge", "connectors" };
+        foreach (var d in new[] { self, LegacyDataDir() })
+        {
+            var full = NormalizeDir(d);
+            if (string.IsNullOrEmpty(full)) continue;
+            foreach (var m in marks)
+                if (Directory.Exists(Path.Combine(full, m))) return full;
+        }
+        return NormalizeDir(self);
+    }
+
+    // 数据目录：存档、apps.json、settings.json 等。
+    //   1) 哪儿已经有数据文件，就用哪儿（升级、换目录都不丢存档）
+    //   2) 全新安装：PETHUB_HOME 环境变量 > %LOCALAPPDATA%\PetHub > 程序目录，
+    //      取第一个真能写进去的（装在 Program Files 时会自动落到 LOCALAPPDATA）
+    static string DataDir()
+    {
+        string self = AppContext.BaseDirectory;
+        string local = LegacyDataDir();
+        string env = Environment.GetEnvironmentVariable("PETHUB_HOME") ?? "";
+        string[] marks = { "pets.json", "apps.json", "settings.json" };
+
+        foreach (var c in new[] { env, self, local })
+        {
+            var full = NormalizeDir(c);
+            if (string.IsNullOrEmpty(full)) continue;
+            foreach (var m in marks)
+                if (File.Exists(Path.Combine(full, m))) return full;
+        }
+
+        foreach (var c in new[] { env, local, self })
+        {
+            var full = NormalizeDir(c);
+            if (string.IsNullOrEmpty(full)) continue;
+            try
+            {
+                Directory.CreateDirectory(full);
+                var probe = Path.Combine(full, ".pethub-write-test");
+                File.WriteAllText(probe, "1");
+                File.Delete(probe);
+                return full;
+            }
+            catch { }
+        }
+
+        return string.IsNullOrEmpty(local) ? NormalizeDir(self) : local;
+    }
 
     // 自带的 Python 运行时（安装包里带了一份 embeddable 版）。
     // 有它就不依赖用户机器上装没装 Python、装的是不是 32 位、PATH 里有没有，
@@ -1169,6 +1272,60 @@ static class Program
     // 自己拉起来的桥进程。退出时要一并收掉，否则桌面宠物关掉了，
     // 后台还留着一个 pythonw 占着 8765（卸载时也删不掉目录）。
     static System.Diagnostics.Process bridgeProc;
+
+    // 追踪器（agent-trace）是状态栏里各款软件进度的数据来源：它没跑，
+    // 状态栏就只剩 hook 报上来的那两款。心跳 90 秒内更新过就算在跑，
+    // 否则用自带的 pythonw 悄悄拉起来（无窗口、单实例由脚本自己保证）。
+    static void StartTracerIfNeeded()
+    {
+        try
+        {
+            var rt = TraceRuntimeDir();
+            if (string.IsNullOrEmpty(rt)) return;
+            var hb = Path.Combine(rt, "heartbeat.json");
+            try
+            {
+                if (File.Exists(hb) &&
+                    (DateTime.UtcNow - File.GetLastWriteTimeUtc(hb)).TotalSeconds < 90)
+                    return;
+            }
+            catch { }
+
+            var dir = Path.Combine(AppContext.BaseDirectory, "agent-trace");
+            var script = Path.Combine(dir, "trace.py");
+            if (!File.Exists(script)) return;
+
+            foreach (var py in PythonCandidates())
+            {
+                string exe = py;
+                try
+                {
+                    var d = Path.GetDirectoryName(py);
+                    if (!string.IsNullOrEmpty(d))
+                    {
+                        var w = Path.Combine(d, "pythonw.exe");
+                        if (File.Exists(w)) exe = w;
+                    }
+                }
+                catch { }
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo(
+                        exe, "\"" + script + "\" watch --pethub")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        WorkingDirectory = dir,
+                    };
+                    System.Diagnostics.Process.Start(psi);
+                    Trace("tracer started via " + exe);
+                    return;
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
 
     static void StartBridgeIfNeeded()
     {
@@ -1232,8 +1389,7 @@ static class Program
     static System.Windows.Forms.Timer appWatchGuard;
     static int appWatchRetry;
 
-    static string PetHubDir() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PetHub");
+    static string PetHubDir() => DataDir();
     static string AppsPath() => Path.Combine(PetHubDir(), "apps.json");
 
     static void LoadApps()
@@ -1744,7 +1900,7 @@ static class Program
             try
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                    ApiBase + "/help") { UseShellExecute = true });
+                    ApiBase + (CurLang == "en" ? "/help?lang=en" : "/help")) { UseShellExecute = true });
             }
             catch { }
         });
@@ -2410,6 +2566,291 @@ static class Program
             }
             catch { trayPolling = false; }
         });
+    }
+
+    // ---------------- 内置卸载器 ----------------
+    // 模仿 WorkBuddy（NSIS）的卸载模式：注册表 ARP 直接指向本 exe 的 --uninstall，
+    // 全程不经过 cmd / PowerShell —— 避开「-Dir 尾部反斜杠吃引号」「执行策略」这些坑。
+    // 自删除：正在运行的 exe 锁着自己删不掉，所以最后把清理脚本写到 %TEMP% 分离启动，
+    // 它等本进程退出后 rmdir 整个目录；路径经环境变量传给脚本（Unicode，不受代码页影响）。
+    static bool HasArg(string[] args, string name)
+        => args != null && Array.Exists(args, a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+
+    static void RunUninstaller(bool silent)
+    {
+        string dir = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\');
+        try
+        {
+            if (!silent)
+            {
+                var r = MessageBox.Show(
+                    "确定要卸载 PetHub 桌宠吗？\n\n" +
+                    "· 停止桌宠、桥接与追踪器\n" +
+                    "· 删除整个安装目录（" + dir + "）\n" +
+                    "· 删除存档与数据（%LOCALAPPDATA%\\PetHub）\n" +
+                    "· 清理注册表、开机自启、快捷方式与 MCP 注册\n\n" +
+                    "系统 Python、WebView2 与你自己的文件不会被改动。",
+                    "卸载 PetHub", MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
+                if (r != DialogResult.Yes) return;
+            }
+
+            // 1) 先请正在跑的那只优雅退出（会摘掉托盘图标）
+            SingleInstance.RequestQuit();
+            WaitForPetExit(8);
+
+            // 2) 强杀残留：可执行文件位于安装目录内的进程（python 桥、追踪器等）
+            foreach (var p in Process.GetProcesses())
+            {
+                try
+                {
+                    if (p.Id == Environment.ProcessId) continue;
+                    string path = null;
+                    try { path = p.MainModule?.FileName; } catch { }
+                    if (path != null && path.StartsWith(dir + "\\", StringComparison.OrdinalIgnoreCase))
+                        try { p.Kill(); } catch { }
+                }
+                catch { }
+                finally { try { p.Dispose(); } catch { } }
+            }
+            Thread.Sleep(600);
+            WaitForPetExit(3);
+
+            // 3) 注册表：「已安装的应用」+ 开机自启
+            try { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(
+                @"Software\Microsoft\Windows\CurrentVersion\Uninstall\PetHub", false); } catch { }
+            foreach (var rk in new[] { @"Software\Microsoft\Windows\CurrentVersion\Run",
+                                        @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run" })
+            {
+                try
+                {
+                    using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(rk, true);
+                    if (k != null) { k.DeleteValue("PetHub", false); k.DeleteValue("PetHubLight", false); }
+                }
+                catch { }
+            }
+
+            // 4) 快捷方式（桌面 / 开始菜单 / 启动项）
+            try
+            {
+                foreach (var d in new[] {
+                    Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                    Environment.GetFolderPath(Environment.SpecialFolder.Programs),
+                    Environment.GetFolderPath(Environment.SpecialFolder.Startup) })
+                {
+                    if (string.IsNullOrEmpty(d)) continue;
+                    foreach (var n in new[] { "PetHub.lnk", "PetHub 桌宠.lnk", "PetHubLight.lnk" })
+                        try { File.Delete(Path.Combine(d, n)); } catch { }
+                }
+            }
+            catch { }
+
+            // 5) MCP 注册（只摘 pethub 条目，其它服务原样保留）+ 技能
+            RemoveMcpEntries();
+        }
+        catch { }
+
+        // 6) 收尾：先把能删的就地删掉，再交给 %TEMP% 的清理脚本收拾最后一棵 maybe
+        //    锁着的 install 目录（自己的 exe 删自己，必须等进程退出）。
+        try
+        {
+            var data = DataDir();
+            if (!string.Equals(data, dir, StringComparison.OrdinalIgnoreCase) && Directory.Exists(data))
+                try { Directory.Delete(data, true); } catch { }
+        }
+        catch { }
+        bool cleaned = false;
+        try { DeleteTreeExceptSelf(dir); } catch { }
+        try { cleaned = LaunchCleanupScript(dir); } catch { }
+        try { ArmLoginCleanup(dir); } catch { }
+
+        if (!silent)
+        {
+            string tail = cleaned
+                ? "程序目录将在几秒内自动删除完毕。"
+                : "未能启动后台清理，请手动删除残留的 " + dir + " 目录。";
+            try
+            {
+                MessageBox.Show("卸载完成，感谢使用 PetHub！\n\n" + tail,
+                    "卸载 PetHub", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch { }
+        }
+    }
+
+    // 尽力清理：先把安装目录里能删的都删掉（除了正在运行的自己）。
+    // 这样即使分离启动的清理脚本被安全软件拦下，目录也已经几乎空了。
+    static void DeleteTreeExceptSelf(string dir)
+    {
+        string self = null;
+        try { self = Environment.ProcessPath; } catch { }
+        for (int round = 0; round < 3; round++)
+        {
+            bool moved = false;
+            try
+            {
+                foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                {
+                    if (self != null && string.Equals(f, self, StringComparison.OrdinalIgnoreCase)) continue;
+                    try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+                    try { File.Delete(f); moved = true; } catch { }
+                }
+            }
+            catch { }
+            try
+            {
+                foreach (var d in Directory.GetDirectories(dir, "*", SearchOption.AllDirectories))
+                {
+                    try { Directory.Delete(d, true); moved = true; } catch { }
+                }
+            }
+            catch { }
+            if (!moved) break;
+            Thread.Sleep(300);
+        }
+    }
+
+    // 等正在跑的 PetHubLight 实例退干净（最多 maxSec 秒）
+    static void WaitForPetExit(int maxSec)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(maxSec);
+        while (DateTime.UtcNow < deadline)
+        {
+            bool any = false;
+            foreach (var p in Process.GetProcessesByName("PetHubLight"))
+            {
+                try { if (p.Id != Environment.ProcessId) any = true; } catch { }
+                finally { try { p.Dispose(); } catch { } }
+            }
+            if (!any) return;
+            Thread.Sleep(300);
+        }
+    }
+
+    // 摘掉各平台 mcp.json 里的 pethub 条目（其它服务与文件本身保留），顺带清技能
+    static void RemoveMcpEntries()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var files = new[] { ".workbuddy", ".qoder", ".claude", ".codex", ".zcode" };
+        var opt = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+        foreach (var f in files)
+        {
+            var path = Path.Combine(home, f, "mcp.json");
+            try
+            {
+                if (!File.Exists(path)) continue;
+                var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path));
+                if (root?["mcpServers"] is System.Text.Json.Nodes.JsonObject servers &&
+                    servers.ContainsKey("pethub"))
+                {
+                    servers.Remove("pethub");
+                    File.WriteAllText(path, root.ToJsonString(opt));
+                }
+                var bak = path + ".pethub-backup";
+                try { if (File.Exists(bak)) File.Delete(bak); } catch { }
+            }
+            catch { }   // 解析失败就不动它
+        }
+        try
+        {
+            var skill = Path.Combine(home, @".workbuddy\skills\pethub-notify");
+            if (Directory.Exists(skill)) Directory.Delete(skill, true);
+        }
+        catch { }
+    }
+
+    // 写 %TEMP%\pethub-cleanup.cmd 并分离启动：等本进程退出后删除安装目录与数据目录。
+    // 脚本纯 ASCII；路径与 PID 全部经环境变量传入（Unicode），不受批处理代码页影响。
+    // 注意：脚本不用括号块，避免 %n% 延迟展开的经典坑。
+    // cmd 起不来时（安全软件拦截等）退而用 PowerShell 做同一件事。
+    static bool LaunchCleanupScript(string dir)
+    {
+        string dataDir = DataDir();
+        string bat = Path.Combine(Path.GetTempPath(), "pethub-cleanup.cmd");
+        string body =
+            "@echo off\r\n" +
+            "rem PetHub uninstall cleanup (auto-generated, safe to delete)\r\n" +
+            "cd /d \"%TEMP%\"\r\n" +
+            "set /a n=0\r\n" +
+            ":wait\r\n" +
+            "tasklist /FI \"PID eq %PETHUB_PID%\" 2>nul | find \"%PETHUB_PID%\" >nul\r\n" +
+            "if errorlevel 1 goto gone\r\n" +
+            "set /a n+=1\r\n" +
+            "if %n% geq 30 goto gone\r\n" +
+            "timeout /t 1 /nobreak >nul 2>nul\r\n" +
+            "goto wait\r\n" +
+            ":gone\r\n" +
+            "timeout /t 1 /nobreak >nul 2>nul\r\n" +
+            "set /a t=0\r\n" +
+            ":del\r\n" +
+            "if not exist \"%PETHUB_DIR%\\\" goto data\r\n" +
+            "rmdir /s /q \"%PETHUB_DIR%\"\r\n" +
+            "set /a t+=1\r\n" +
+            "if %t% geq 8 goto data\r\n" +
+            "timeout /t 1 /nobreak >nul 2>nul\r\n" +
+            "goto del\r\n" +
+            ":data\r\n" +
+            "rmdir /s /q \"%PETHUB_DATA%\"\r\n" +
+            "(goto) 2>nul & del \"%~f0\"\r\n";
+        File.WriteAllText(bat, body, new System.Text.UTF8Encoding(false));
+
+        var psi = new ProcessStartInfo(
+            Environment.SystemDirectory + "\\cmd.exe", "/c \"\"" + bat + "\"\"")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetTempPath(),
+        };
+        psi.EnvironmentVariables["PETHUB_PID"] = Environment.ProcessId.ToString();
+        psi.EnvironmentVariables["PETHUB_DIR"] = dir;
+        psi.EnvironmentVariables["PETHUB_DATA"] = dataDir;
+        try { Process.Start(psi); return true; }
+        catch { }
+
+        // 备用通道：PowerShell 版清理脚本（同样自我销毁）
+        try
+        {
+            string ps1 = Path.Combine(Path.GetTempPath(), "pethub-cleanup.ps1");
+            File.WriteAllText(ps1,
+                "$ErrorActionPreference = 'SilentlyContinue'\r\n" +
+                "Start-Sleep -Milliseconds 500\r\n" +
+                "foreach ($i in 1..25) {\r\n" +
+                "  if (-not (Test-Path -LiteralPath $env:PETHUB_DIR)) { break }\r\n" +
+                "  Remove-Item -LiteralPath $env:PETHUB_DIR -Recurse -Force\r\n" +
+                "  if (-not (Test-Path -LiteralPath $env:PETHUB_DIR)) { break }\r\n" +
+                "  Start-Sleep -Milliseconds 500\r\n" +
+                "}\r\n" +
+                "if (Test-Path -LiteralPath $env:PETHUB_DATA) { Remove-Item -LiteralPath $env:PETHUB_DATA -Recurse -Force }\r\n" +
+                "Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force\r\n",
+                new System.Text.UTF8Encoding(false));
+            var psi2 = new ProcessStartInfo(
+                Environment.SystemDirectory + "\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + ps1 + "\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetTempPath(),
+            };
+            psi2.EnvironmentVariables["PETHUB_DIR"] = dir;
+            psi2.EnvironmentVariables["PETHUB_DATA"] = dataDir;
+            Process.Start(psi2);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    // 登录时兜底：万一后台清理脚本被安全软件拦下（或进程被强杀），
+    // 下一次登录由 RunOnce 再删一次；删完该项自动消失。
+    // 注意走注册表 API 写值，路径是 Unicode，和批处理代码页无关。
+    static void ArmLoginCleanup(string dir)
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\RunOnce", true);
+            k.SetValue("PetHubCleanup", "cmd.exe /c rmdir /s /q \"" + dir + "\"");
+        }
+        catch { }
     }
 }
 

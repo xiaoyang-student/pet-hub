@@ -17,10 +17,26 @@ A little pet that lives on your desktop and keeps an eye on what Qoder, WorkBudd
 
 Prefer not to build it yourself? Grab the installer:
 
-**[↓ PetHub-Setup-v1.0.exe](https://github.com/xiaoyang-student/pet-hub/releases/latest) (130 MB — double-click to install)**
+**[↓ PetHub-Setup-v1.2.1.exe](https://github.com/xiaoyang-student/pet-hub/releases/latest) (130 MB — double-click to install)**
 
-There is also a portable `PetHub-Setup-v1.0.zip` (75 MB — unzip and run). Both ship their own Python
+There is also a portable `PetHub-Setup-v1.2.1.zip` (75 MB — unzip and run). Both ship their own Python
 runtime and need no administrator rights.
+
+> **New in v1.1**: the **AI status tracker** (`agent-trace\`) — follows all 8 AI office apps step by
+> step; the uninstaller was rewritten from scratch (stop tasks → delete everything → clean the
+> registry, without touching any of your other software).
+>
+> **New in v1.2**: one app gets exactly one status row; finished rows retire in 60s;
+> Qwen Work now reads its real event stream (the old probe read an empty database and
+> reported 0 steps); "150s idle" is no longer reported as finished.
+>
+> **New in v1.2.1**: nothing is assumed to live in a fixed place — the install
+> directory is selectable (`-Dir`), uninstall locates the real directory via
+> process / registry / shortcuts and requires a PetHub fingerprint match, and the
+> tracked AI apps are found by enumerating this machine's actual drives instead of
+> hardcoded `D:\` paths. A running app is located straight from its process image.
+>
+> Full history: [Releases](https://github.com/xiaoyang-student/pet-hub/releases).
 
 > Repo owner: after publishing a Release, replace `xiaoyang-student/pet-hub` above with your real repository path.
 
@@ -70,6 +86,12 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1 -Purge   # removes everyt
 pet-hub/
 ├─ app/index.html          The pet: rendering, HUD, all interaction logic
 ├─ bridge/server.py        Bridge service (127.0.0.1:8765) — collects events, feeds the pet
+├─ agent-trace/            AI status tracker (new in v1.1)
+│   ├─ trace.py            Entry point: scan / watch / selftest
+│   ├─ start-tracer.bat    Double-click start (uses the bundled Python, feeds the pet)
+│   ├─ core/               Discovery + engine + noise filtering
+│   ├─ adapters/           Probes for the 8 apps (WorkBuddy/Qoder/ZCode/Qwen/Doubao family/Dazi/ChatGPT)
+│   └─ tools/              realtest.py (takeover test on real schemas), simulate.py
 ├─ connectors/             Integration toolkit
 │   ├─ pethub.py           CLI: install/remove integrations, status, one-line reporting
 │   ├─ pethub_mcp.py       MCP tool server (recommended — any MCP client can call it)
@@ -82,6 +104,19 @@ pet-hub/
 
 Start the bridge (`python bridge/server.py`) first, then `PetHubLight.exe`.
 The shell starts the bridge itself if it isn't running.
+
+### AI status tracker (new in v1.1, agent-trace\)
+
+Want the pet bubble to show what **8 AI office apps** (WorkBuddy / Qoder / ZCode / Qwen Work /
+Doubao / Doubao Work / Baidu Dazi / ChatGPT) are doing, step by step? Just double-click:
+
+```
+agent-trace\start-tracer.bat      (uses PetHub's bundled Python — nothing to install)
+```
+
+It **never guesses**: it reads the records those apps write themselves (trace span streams, SQLite
+session databases, engine logs), auto-detects which ones are installed and follows those.
+See `agent-trace\README.md`.
 
 ---
 
@@ -171,7 +206,8 @@ The tray entry "已接入 N 个" lets you enable / disable / clear the list at a
 
 - **"Needs approval / stuck" only comes from the app's own report** (`pethub_ask`, `--ask`, or a hook carrying `ask`).
 - With no signal, the pet states facts only, e.g. "Qoder has been quiet for 7 minutes" — it will **not** turn that into "waiting for you".
-- A task with no updates for **30 minutes** is treated as lost contact and removed, so nothing keeps claiming "still running".
+- A task with no updates for **30 minutes** is treated as lost contact and removed, so nothing keeps claiming "still running"; **done / error** rows do not wait that long — they leave after 60 seconds (the bridge sweeps every 15s, worst case ~75s).
+- **One row per conversation**: several turns in the same conversation, and WorkBuddy tool spans, merge into that single row instead of one row per turn.
 
 ---
 

@@ -17,9 +17,17 @@
 
 不想自己编译？直接下安装器：
 
-**[↓ PetHub-Setup-v1.0.exe](https://github.com/xiaoyang-student/pet-hub/releases/latest)（130 MB，双击即装）**
+**[↓ PetHub-Setup-v1.2.1.exe](https://github.com/xiaoyang-student/pet-hub/releases/latest)（130 MB，双击即装）**
 
-另有便携版 `PetHub-Setup-v1.0.zip`（75 MB，解压即用）。两者都自带 Python 运行时，不需要管理员权限。
+另有便携版 `PetHub-Setup-v1.2.1.zip`（75 MB，解压即用）。两者都自带 Python 运行时，不需要管理员权限。
+
+> **v1.1 更新**：新增 **AI 状态追踪器**（`agent-trace\`，跟踪 8 款 AI 办公软件的每一步）；卸载脚本彻底重写（停任务 → 删干净 → 清注册表，绝不碰你其它软件的环境）。
+>
+> **v1.2 更新**：状态栏一个软件只占一行；完成的任务 60 秒内退场；千问办公换成真实数据源（原来读的是空库，长期 0 步）；不再把「150 秒没动静」谎报成已完成。
+>
+> **v1.2.1 更新**：不再假设任何东西装在哪儿 —— 安装目录可自选（`-Dir`）、卸载按进程 / 注册表 / 快捷方式定位且必须通过目录指纹校验、被跟踪的 AI 软件改为枚举本机真实盘符（不再写死 `D:\`），正在运行的软件直接从进程映像读出安装位置。
+>
+> 完整版本历史见 [Releases](https://github.com/xiaoyang-student/pet-hub/releases)。
 
 > 仓库所有者：发布 Releases 后，把上面链接里的 `xiaoyang-student/pet-hub` 换成你的实际地址即可。
 
@@ -85,6 +93,12 @@ app\                     宠物页面
 pet-hub/
 ├─ app/index.html          宠物本体（画面、宠物、HUD、全部交互逻辑）
 ├─ bridge/server.py        桥接服务（127.0.0.1:8765，收事件、转发给桌宠）
+├─ agent-trace/            AI 状态追踪器（v1.1 新增）
+│   ├─ trace.py            入口：scan / watch / selftest
+│   ├─ start-tracer.bat    双击启动（用自带 Python，推给桌宠气泡）
+│   ├─ core/               发现 + 引擎 + 降噪
+│   ├─ adapters/           8 款软件的探针（WorkBuddy/Qoder/ZCode/千问/豆包系/搭子/ChatGPT）
+│   └─ tools/              realtest.py（真实表结构接管测试）、simulate.py
 ├─ connectors/             接入工具集
 │   ├─ pethub.py           命令行：安装/卸载接入、状态、一行上报
 │   ├─ pethub_mcp.py       MCP 工具服务（推荐，任何支持 MCP 的客户端都能调）
@@ -97,6 +111,16 @@ pet-hub/
 ```
 
 启动顺序：先跑桥接（`python bridge/server.py`），再启动 `PetHubLight.exe`。壳层检测不到桥接时会自己拉起它。
+
+### AI 状态追踪器（v1.1 新增，agent-trace\）
+
+想让桌宠气泡实时显示 **8 款 AI 办公软件**（WorkBuddy / Qoder / ZCode / 千问办公 / 豆包 / 豆包工作 / 百度搭子 / ChatGPT）每一步在干什么？双击：
+
+```
+agent-trace\start-tracer.bat      （用 PetHub 自带的 Python，什么都不用装）
+```
+
+它**不猜状态**——直接读这些软件自己写下的记录（trace span 流、SQLite 会话库、引擎日志），自动发现装了哪几款就跟踪哪几款。详见 `agent-trace\README.md`。
 
 ---
 
@@ -191,7 +215,8 @@ PetHubLight.exe --watch-app "C:\Program Files\Doubao\Doubao.exe"
 
 - **"要授权 / 卡住了"只认应用亲口上报**（`pethub_ask`、`--ask`、或 hook 带 `ask` 标记）。
 - 没有任何信号时，宠物只会说客观事实，例如「Qoder 已经 7 分钟没有新消息了」，**不会**推断成"在等你"。
-- 任务超过 **30 分钟**没有新事件会被当作失联自动移除，避免"应用早关了还说在跑"。
+- 任务超过 **30 分钟**没有新事件会被当作失联自动移除，避免"应用早关了还说在跑"；**已完成 / 已失败**的行不等 30 分钟，60 秒后自动退场（桥接每 15 秒巡检，最迟约 75 秒）。
+- 状态栏**一行对应一个会话**：同一会话里多轮问答、WorkBuddy 的工具 span 都合并到这一行，不会一轮一行。
 
 ---
 

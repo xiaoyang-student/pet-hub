@@ -18,7 +18,7 @@ static class Setup
 {
     public const string AppName = "PetHub 桌宠";
     public const string ExeName = "PetHubLight.exe";
-    public const string AppVersion = "1.0";
+    public const string AppVersion = "1.2.1";
     public const string Publisher = "PetHub Contributors";
     public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     // 「已安装的应用」（设置 → 应用 → 已安装的应用）里的条目；用户级，不需要管理员
@@ -181,7 +181,7 @@ static class Setup
     {
         using var hc = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
         // 有些站点会拦空 UA
-        try { hc.DefaultRequestHeaders.UserAgent.ParseAdd("PetHub-Setup/1.1"); } catch { }
+        try { hc.DefaultRequestHeaders.UserAgent.ParseAdd("PetHub-Setup/1.2"); } catch { }
         using var resp = hc.GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
                            .GetAwaiter().GetResult();
         resp.EnsureSuccessStatusCode();
@@ -288,13 +288,15 @@ static class Setup
             }
             catch { }
 
-            string un = Path.Combine(dir, "卸载 PetHub.cmd");
             using var k = Registry.CurrentUser.CreateSubKey(ArpKey, true);
             k.SetValue("DisplayName", AppName);
             k.SetValue("DisplayVersion", AppVersion);
             k.SetValue("Publisher", Publisher);
             k.SetValue("InstallLocation", dir);
-            k.SetValue("UninstallString", "\"" + un + "\"");
+            // 卸载入口直接指向 exe（WorkBuddy / NSIS 的做法）：
+            // 卸载器自己会被删掉，这正是注册表的标准用法。
+            k.SetValue("UninstallString", "\"" + exe + "\" --uninstall");
+            k.SetValue("QuietUninstallString", "\"" + exe + "\" --uninstall --silent");
             k.SetValue("DisplayIcon", "\"" + exe + "\"");
             k.SetValue("EstimatedSize", (int)Math.Min(int.MaxValue, bytes / 1024), RegistryValueKind.DWord);
             k.SetValue("NoModify", 1, RegistryValueKind.DWord);
@@ -306,22 +308,19 @@ static class Setup
 
     static void WriteUninstaller(string dir, string exe)
     {
+        // 卸载逻辑内置在 PetHubLight.exe --uninstall 里（模仿 WorkBuddy 的
+        // Uninstall exe 模式）：注册表直接指向它，双击这个 cmd 也一样。
+        // 全程不经过 PowerShell —— 避开执行策略、编码、以及批处理传参里
+        // 尾部反斜杠吃掉引号导致「什么都没删」的坑。
         string un = Path.Combine(dir, "卸载 PetHub.cmd");
         string body =
-            "@echo off\r\nchcp 65001 >nul\r\n" +
-            "echo 正在关闭 PetHub…\r\n" +
-            "if exist \"%~dp0" + ExeName + "\" \"%~dp0" + ExeName + "\" --quit\r\n" +
-            "timeout /t 3 >nul\r\n" +
-            "taskkill /IM PetHubLight.exe >nul 2>nul\r\n" +
-            "timeout /t 2 >nul\r\n" +
-            "taskkill /IM PetHubLight.exe /F >nul 2>nul\r\n" +
-            "reg delete \"HKCU\\" + @"Software\Microsoft\Windows\CurrentVersion\Run" + "\" /v PetHub /f >nul 2>nul\r\n" +
-            "reg delete \"HKCU\\" + @"Software\Microsoft\Windows\CurrentVersion\Uninstall\PetHub" + "\" /f >nul 2>nul\r\n" +
-            "del \"%USERPROFILE%\\Desktop\\" + AppName + ".lnk\" >nul 2>nul\r\n" +
-            "del \"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\" + AppName + ".lnk\" >nul 2>nul\r\n" +
-            "echo 正在删除程序目录（宠物存档保留在 %LOCALAPPDATA%\\PetHub\\settings.json）…\r\n" +
-            "start \"\" cmd /c \"timeout /t 2 >nul & rmdir /s /q \\\"%~dp0\\\"\"\r\n";
-        try { File.WriteAllText(un, body, System.Text.Encoding.UTF8); } catch { }
+            "@echo off\r\n" +
+            "rem PetHub uninstaller entry.\r\n" +
+            "rem The real uninstall logic is built into PetHubLight.exe --uninstall,\r\n" +
+            "rem which is also the UninstallString registered in Apps & features.\r\n" +
+            "\"%~dp0" + ExeName + "\" --uninstall\r\n" +
+            "exit /b %ERRORLEVEL%\r\n";
+        try { File.WriteAllText(un, body, new System.Text.UTF8Encoding(false)); } catch { }
     }
 }
 
