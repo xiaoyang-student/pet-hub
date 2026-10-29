@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.log
+live*.jsonl
+final*.jsonl
+sample-events.jsonl

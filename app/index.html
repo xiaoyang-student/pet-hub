@@ -47,7 +47,7 @@
     margin-top:5px; overflow:hidden; position:relative; }
   .bar i { display:block; height:100%; border-radius:3px; transition:width .5s; }
   .bar.indet i { width:36% !important; animation:slide 1.2s linear infinite; }
-  @keyframes slide { from{margin-left:-40%} to{margin-left:110%} }
+  @keyframes slide { from{transform:translateX(-111.111%)} to{transform:translateX(305.556%)} }
   .task-wait .task-title { color:#ffc861; }
   .task-wait .bar { background:rgba(255,200,97,.15); }
   .task-err .task-title { color:#ff7a6e; }
@@ -117,7 +117,7 @@
 <div id="bubble"></div>
 <div id="menu"></div>
 <div id="toasts"></div>
-<div class="note" id="noteLine" style="display:none">PetHub · 桥接服务未连接时运行内置演示数据</div>
+<div class="note" id="noteLine" style="display:none">PetHub · 桥接服务未连接</div>
 
 <script>
 "use strict";
@@ -223,6 +223,7 @@ const I18N = {
       tasks: n => `${n} 个任务`, today: n => `今天盯了 ${n} 个`,
       noTask: "暂无任务 · 等待连接器上报",
       connected: "PetHub · 桥接服务已连接 (127.0.0.1:8765)",
+      offline: "PetHub · 桥接服务未连接 (127.0.0.1:8765) · 任务状态未知（不代表没有任务）",
       demo: "PetHub · 演示模式（未检测到桥接服务，运行 python bridge/server.py 接入真实平台）",
     },
     stats: { satiety: "饱腹", energy: "体力", mood: "心情", hygiene: "卫生", health: "健康" },
@@ -318,6 +319,7 @@ const I18N = {
       tasks: n => `${n} task${n > 1 ? "s" : ""}`, today: n => `${n} watched today`,
       noTask: "No tasks yet · waiting for connectors",
       connected: "PetHub · bridge connected (127.0.0.1:8765)",
+      offline: "PetHub · bridge offline (127.0.0.1:8765) · task state unknown",
       demo: "PetHub · demo mode (bridge not found — run python bridge/server.py)",
     },
     stats: { satiety: "Food", energy: "Energy", mood: "Mood", hygiene: "Clean", health: "Health" },
@@ -778,9 +780,10 @@ function subjectOf(t){
 // "在等你" 还是 "在问你"：授权/询问/选择 都算提问
 const ASK_RE = /授权|询问|permission|approve|confirm|确认|consent|是否|要不要|可以吗|行吗|y\/n|yes\s*or\s*no|AskUserQuestion|ExitPlanMode|批准|选择|拍板|建议/i;
 function flavorOf(t){
+  if(["stalled", "denied", "idle", "observing", "cancelled"].includes(t.phase)) return t.phase;
   if(t.status === "waiting"){
-    if(t.ask) return "ask";
-    if(ASK_RE.test(String(t.message||"") + " " + String(t.title||""))) return "ask";
+    if(t.ask || t.phase === "asking") return "ask";
+    if(!t.phase && ASK_RE.test(String(t.message||"") + " " + String(t.title||""))) return "ask";
     return "waiting";
   }
   // 平台只报"运行中"，但很久没有新事件 → 推断它停住了（不敢断言是在问你）
@@ -904,7 +907,20 @@ function fill(tpl, t){
             .replace(/\s{2,}/g, " ").trim();
 }
 // fresh=true 每次换一种说法（宠物播报）；否则按时间缓慢轮换（HUD，约 45 秒一换）
+const TASK_PHASE_TEXT = {
+  received: ["已接题", "Prompt received"], thinking: ["思考中", "Thinking"],
+  tool: ["执行工具", "Running tool"], editing: ["修改文件", "Editing files"],
+  answering: ["回答中", "Answering"], asking: ["等待你确认", "Needs your confirmation"],
+  denied: ["授权已拒绝", "Permission denied"], done: ["本轮已完成", "Turn completed"],
+  stalled: ["暂无新动作，尚未确认结束", "No new activity; completion unconfirmed"],
+  error: ["出错", "Error"], idle: ["未确认正在执行任务", "No confirmed active task"],
+  observing: ["仅检测到软件活动", "Only application activity detected"],
+  cancelled: ["本轮已取消", "Turn cancelled"]
+};
 function phraseFor(t, fresh){
+  if(Object.hasOwn(TASK_PHASE_TEXT, t.phase)){
+    return platName(t.platform) + " · " + TASK_PHASE_TEXT[t.phase][LANG === "en" ? 1 : 0];
+  }
   const kind = flavorOf(t);
   const pool = T().pool[kind] || T().pool.running;
   const salt = (t.platform||"") + "|" + (t.id||"") + "|" + kind;
@@ -917,32 +933,58 @@ function exclaim(s){ return /[？?！!～~]$/.test(s) ? s : s + "！"; }
 let hudOpen = {};                   // 平台 -> 是否展开
 let hudHidden = false;
 let bridgeOnline = false;
+// 演示数据只在显式 ?demo=1 时启用：默认自动演示会让托盘和状态栏出现
+// 根本不存在的任务，用户没法分辨哪些是真的。
+const DEMO_ENABLED = new URLSearchParams(location.search).get("demo") === "1";
 let demoTimer = null;
+let demoKeys = [];
 let doneToday = 0, todayDay = new Date().getDate();
+let lastHudHTML = null;
+const taskNotices = new Map();
 
 function taskKey(t){ return t.platform + "::" + (t.id || t.title); }
 
 function applySnapshot(snap){
   TASKS.clear();
-  (snap.tasks || []).forEach(t => TASKS.set(taskKey(t), normalize(t)));
+  (snap.tasks || []).forEach(raw => {
+    const t = normalize(raw);
+    TASKS.set(taskKey(t), t);
+    recordTaskNotice(t);
+  });
   renderHUD();
 }
 function normalize(t){
   return { platform:t.platform||"unknown", id:t.id||"", title:t.title||"未命名任务",
     status:t.status||"running", progress:(t.progress==null?null:Math.max(0,Math.min(100,+t.progress))),
+    phase:String(t.phase||"").slice(0,24), tool:String(t.tool||"").slice(0,100),
+    turn:String(t.turn||"").slice(0,200), terminal:!!t.terminal,
     message:t.message||"", ask:!!t.ask, ts:t.ts||Date.now()/1000 };
 }
+function htmlText(value){
+  return String(value).replace(/[&<>"']/g, ch => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[ch]));
+}
+function inactiveTask(t){
+  return ["idle", "observing", "cancelled", "stalled"].includes(t.phase);
+}
 
+function recordTaskNotice(t){
+  const key = taskKey(t) + "|" + t.turn;
+  if(!["done", "waiting", "error"].includes(t.status)){
+    if(!t.terminal) taskNotices.delete(key);
+    return false;
+  }
+  const changed = taskNotices.get(key) !== t.status;
+  taskNotices.set(key, t.status);
+  while(taskNotices.size > 512) taskNotices.delete(taskNotices.keys().next().value);
+  return changed;
+}
 function onEvent(ev){
   if(ev.type === "snapshot"){ applySnapshot(ev); return; }
   if(ev.type === "task"){
     const t = normalize(ev.task), old = TASKS.get(taskKey(t));
+    if(old && old.turn && old.turn === t.turn && (old.terminal || old.status === "done")) return;
     TASKS.set(taskKey(t), t);
-    if(old){
-      if(old.status !== "waiting" && t.status === "waiting") announce("waiting", t);
-      if(old.status !== "done" && t.status === "done") announce("done", t);
-      if(old.status !== "error" && t.status === "error") announce("error", t);
-    }
+    if(recordTaskNotice(t)) announce(t.status, t);
     renderHUD();
   }
   if(ev.type === "removed"){ TASKS.delete(ev.key); renderHUD(); }
@@ -955,15 +997,15 @@ function announce(kind, t){
     ST.mood = Math.min(100, ST.mood + 3);
     doneToday++;
     say(exclaim(p));
-    toast(`<b>✅ ${platName(t.platform)}</b> · ${p}`);
+    toast(`<b>✅ ${htmlText(platName(t.platform))}</b> · ${htmlText(p)}`);
   } else if(kind === "waiting"){
     const ask = flavorOf(t) === "ask";
     say(exclaim(p) + (ask ? (LANG === "en" ? " Go click it!" : " 快去点它！")
                           : (LANG === "en" ? " Go have a look!" : " 去看看吧！")));
-    toast(`<b>${ask ? "🙋" : "⏸️"} ${platName(t.platform)}</b> · ${p}`);
+    toast(`<b>${ask ? "🙋" : "⏸️"} ${htmlText(platName(t.platform))}</b> · ${htmlText(p)}`);
   } else if(kind === "error"){
     say(LANG === "en" ? `Uh oh... ${p}, want to take a look?` : `呜……${p}，要看看吗？`);
-    toast(`<b>❌ ${platName(t.platform)}</b> · ${p}`);
+    toast(`<b>❌ ${htmlText(platName(t.platform))}</b> · ${htmlText(p)}`);
   }
 }
 
@@ -977,13 +1019,18 @@ function toast(html){
 function groupByPlat(){
   const g = new Map();
   TASKS.forEach(t => {
-    if(!g.has(t.platform)) g.set(t.platform, []);
-    g.get(t.platform).push(t);
+    const platform = platName(t.platform);
+    if(!g.has(platform)) g.set(platform, []);
+    g.get(platform).push(t);
   });
   return g;
 }
 
 function renderHUD(){
+  const doneT = Date.now()/1000 - 60;    // 完成/报错 60 秒后从显示中移除
+  [...TASKS].forEach(([k,t]) => {
+    if((t.status==="done"||t.status==="error") && t.ts < doneT) TASKS.delete(k);
+  });
   const g = groupByPlat();
   const list = el("platList");
   let total = TASKS.size;
@@ -991,59 +1038,62 @@ function renderHUD(){
   if(today !== todayDay){ todayDay = today; doneToday = 0; }   // 跨天清零
   el("hudN").textContent = total
     ? T().ui.tasks(total) + (doneToday ? " · " + T().ui.today(doneToday) : "") : "";
-  const doneT = Date.now()/1000 - 60;    // 完成/报错 60 秒后从显示中移除
-  [...TASKS].forEach(([k,t]) => {
-    if((t.status==="done"||t.status==="error") && t.ts < doneT) TASKS.delete(k);
-  });
 
   let html = "";
   for(const [plat, arr] of g){
-    if(!hudOpen[plat]) hudOpen[plat] = arr.some(t=>t.status==="waiting");
+    if(!Object.hasOwn(hudOpen, plat)) hudOpen[plat] = arr.some(t=>t.status==="waiting");
     const wait = arr.filter(t=>t.status==="waiting").length;
     const askN = arr.filter(t=>t.status==="waiting" && flavorOf(t)==="ask").length;
     const waitN = wait - askN;
-    const run  = arr.filter(t=>t.status==="running"||t.status==="thinking").length;
-    // 措辞诚实：只有平台明确说"在问你"才写"等你拍板"，其余只写"等你处理"
+    const run = arr.filter(t=>(t.status==="running"||t.status==="thinking") && !inactiveTask(t)).length;
+    const done = arr.filter(t=>t.status==="done").length;
+    const errors = arr.filter(t=>t.status==="error").length;
+    const inactive = arr.filter(t=>inactiveTask(t)).length;
     const SU = T().sum;
     const sum = [run?SU.busy(run):"", askN?SU.ask(askN):"", waitN?SU.wait(waitN):"",
-                 (arr.length-run-wait)?SU.done(arr.length-run-wait):""]
+                 done?SU.done(done):"", errors?`${errors} ${LANG==="en"?"failed / denied":"异常 / 拒绝"}`:"",
+                 inactive?`${inactive} ${LANG==="en"?"inactive / unconfirmed":"未活动 / 未确认"}`:""]
       .filter(Boolean).join(" · ") || SU.idle;
-    html += `<div class="plat ${hudOpen[plat]?"open":""}" data-p="${plat}">
+    html += `<div class="plat ${hudOpen[plat]?"open":""}" data-p="${htmlText(plat)}">
       <div class="plat-head">
         <div class="plat-dot" style="background:${platColor(plat)}"></div>
-        <div class="plat-name">${platName(plat)}</div>
+        <div class="plat-name">${htmlText(platName(plat))}</div>
         <div class="plat-sum">${sum}</div><div class="plat-arrow">${hudOpen[plat]?"▾":"▸"}</div>
       </div>
       <div class="tasks">` +
       arr.map(t=>{
         const m = STATUS_META[t.status] || STATUS_META.running;
-        const indet = (t.status==="running"||t.status==="thinking") && t.progress==null;
+        const indet = (t.status==="running"||t.status==="thinking") && !inactiveTask(t) && t.progress==null;
         const pct = indet ? "" : (t.progress==null ? (t.status==="done"?"100":"") : Math.round(t.progress)+"%");
         const width = t.progress!=null ? t.progress : (t.status==="done"?100:(t.status==="error"?100:8));
         return `<div class="task ${t.status==="waiting"?"task-wait":""} ${t.status==="error"?"task-err":""} ${t.status==="done"?"task-done":""}"
-             data-k="${t.platform}::${t.id}" title="${T().statusLabel[t.status]||""} · ${t.title}${t.message?" · "+t.message:""}">
+             data-k="${htmlText(taskKey(t))}" title="${htmlText(phraseFor(t) + " · " + t.title + (t.message?" · "+t.message:""))}">
           <div class="task-row">
             <div class="task-ico">${m.ico}</div>
-            <div class="task-title">${phraseFor(t)}</div><div class="task-pct">${pct}</div>
+            <div class="task-title">${htmlText(phraseFor(t))}</div><div class="task-pct">${pct}</div>
           </div>
           <div class="bar ${indet?"indet":""}"><i style="width:${width}%;background:${m.col}"></i></div>
-          ${t.message?`<div class="task-msg">${t.message}</div>`:""}
+          ${t.message?`<div class="task-msg">${htmlText(t.message)}</div>`:""}
         </div>`;
       }).join("") +
       `</div></div>`;
   }
-  list.innerHTML = html || `<div style="padding:10px 12px;font-size:11.5px;color:#7286a3">${T().ui.noTask}</div>`;
+  html = html || `<div style="padding:10px 12px;font-size:11.5px;color:#7286a3">${T().ui.noTask}</div>`;
+  if(html !== lastHudHTML){
+    list.innerHTML = html;
+    lastHudHTML = html;
 
-  list.querySelectorAll(".plat-head").forEach(h => h.onclick = () => {
-    hudOpen[h.parentElement.dataset.p] = !hudOpen[h.parentElement.dataset.p]; renderHUD();
-  });
-  list.querySelectorAll(".task").forEach(k => k.onclick = () => {
-    const t = TASKS.get(k.dataset.k);
-    if(t){ const p = phraseFor(t, true);
-      say(t.status==="waiting" ? `${exclaim(p)}${LANG==="en"?" Stop poking my face, go click it!":" 点我脸干嘛，去点它！"}`
-        : t.status==="done" ? `${p}`
-        : `${p}${t.message ? " · " + t.message : ""}`); }
-  });
+    list.querySelectorAll(".plat-head").forEach(h => h.onclick = () => {
+      hudOpen[h.parentElement.dataset.p] = !hudOpen[h.parentElement.dataset.p]; renderHUD();
+    });
+    list.querySelectorAll(".task").forEach(k => k.onclick = () => {
+      const t = TASKS.get(k.dataset.k);
+      if(t){ const p = phraseFor(t, true);
+        say(t.status==="waiting" ? `${exclaim(p)}${LANG==="en"?" Stop poking my face, go click it!":" 点我脸干嘛，去点它！"}`
+          : t.status==="done" ? `${p}`
+          : `${p}${t.message ? " · " + t.message : ""}`); }
+    });
+  }
   reportTasksToShell();
 }
 
@@ -1068,6 +1118,7 @@ function taskSnapshot(){
 }
 function reportTasksToShell(){
   if(!(window.petHub && window.petHub.tasks)) return;
+  if(demoTimer) return;           // 演示任务绝不进托盘：那里必须只有真实状态
   let s;
   try { s = JSON.stringify(taskSnapshot()); } catch(e){ return; }
   if(s === _taskSig) return;      // 没变化就不打扰壳层
@@ -1126,8 +1177,14 @@ function connectBridge(){
   es.onerror = () => {
     if(bridgeOnline){ bridgeOnline = false; reportTasksToShell(); }   // 桥断了要让托盘立刻知道
     else bridgeOnline = false;
+    if(!DEMO_ENABLED) el("noteLine").textContent = T().ui.offline;
   };
-  setTimeout(()=>{ if(!bridgeOnline) startDemo(); }, 2500);
+  // 没连上就如实显示离线；只有显式 ?demo=1 才跑演示数据。
+  setTimeout(()=>{
+    if(bridgeOnline) return;
+    if(DEMO_ENABLED) startDemo();
+    else el("noteLine").textContent = T().ui.offline;
+  }, 2500);
 }
 
 // 内置演示：三个平台模拟
@@ -1145,7 +1202,7 @@ function startDemo(){
   // 已完成任务要显式构造，mk 的第四个参数是进度不是状态
   demo["WorkBuddy"].push({platform:"WorkBuddy", id:"w3", title:"部署前端更新",
     status:"done", progress:100, message:"已发布到生产环境", ts:Date.now()/1000});
-  Object.values(demo).flat().forEach(t=>TASKS.set(taskKey(t),t));
+  Object.values(demo).flat().forEach(t=>{ demoKeys.push(taskKey(t)); TASKS.set(taskKey(t),t); });
   renderHUD();
   let tick = 0;
   demoTimer = setInterval(()=>{
@@ -1173,7 +1230,14 @@ function startDemo(){
     renderHUD();
   }, 900);
 }
-function stopDemo(){ if(demoTimer){ clearInterval(demoTimer); demoTimer=null; } }
+function stopDemo(){
+  if(demoTimer){ clearInterval(demoTimer); demoTimer = null; }
+  if(demoKeys.length){
+    demoKeys.forEach(k => TASKS.delete(k));
+    demoKeys = [];
+    renderHUD();
+  }
+}
 
 // ---------------- 状态层（多只宠物 + 生命周期） ----------------
 /* 一只宠物 = 一个对象。所有"当前操作的那只"通过 bindActive(i) 投影到一排老变量上，
@@ -1393,7 +1457,7 @@ function placeBubble(){
 function say(text, from, who){
   const b = el("bubble");
   bubbleFor = who || null;
-  b.innerHTML = text + `<span class="from">${from || (spName() + " · " + T().stats.mood + " " + Math.round(ST.mood))}</span>`;
+  b.innerHTML = htmlText(text) + `<span class="from">${htmlText(from || (spName() + " · " + T().stats.mood + " " + Math.round(ST.mood)))}</span>`;
   b.classList.add("show");
   bubbleW = Math.min(250, Math.max(120, b.offsetWidth || 200));   // 量一次，之后每帧只挪位置
   bubbleH = Math.max(34, b.offsetHeight || 60);
@@ -2777,7 +2841,7 @@ function applyLang(){
   const u = T().ui;
   const t = document.querySelector("#hud .hud-head .t"); if(t) t.textContent = u.hudTitle;
   const c = el("hudHide"); if(c) c.textContent = u.collapse;
-  if(!bridgeOnline) el("noteLine").textContent = u.demo;
+  if(!bridgeOnline) el("noteLine").textContent = (DEMO_ENABLED && demoTimer) ? u.demo : u.offline;
   _faceCur = ""; setHudFace();
   renderHUD();
   say(T().lines.greeting, spName());

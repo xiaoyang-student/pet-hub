@@ -25,8 +25,7 @@ DUMP = Path.home() / ".pethub-hookdump.log"      # 事件留痕（排查用，�
 # 这些工具名 = 平台在向用户提问 / 要授权 / 要拍板
 ASK_TOOLS = {"askuserquestion", "exitplanmode", "requestpermission",
              "permissionrequest", "askquestion", "confirm", "userconfirmation"}
-ASK_KW = ("授权", "询问", "确认", "是否", "要不要", "可以吗", "行吗", "批准",
-          "选择", "permission", "approve", "confirm", "consent", "yes or no", "y/n")
+ASK_NOTIFICATIONS = {"permission_prompt", "elicitation_dialog"}
 
 STATUS_MAP = {"start": "running", "running": "running", "thinking": "thinking",
               "waiting": "waiting", "done": "done", "error": "error"}
@@ -51,7 +50,10 @@ def main():
     except Exception:
         ev = {}
 
-    sess = str(ev.get("session_id") or ev.get("conversation_id")
+    if not isinstance(ev, dict):
+        return
+    sess = str(ev.get("session_id") or ev.get("sessionId")
+               or ev.get("conversation_id") or ev.get("conversationId")
                or ev.get("session") or "main")
 
     # ---- 事件留痕（默认关闭！会记录平台送来的原始内容，可能含隐私） ----
@@ -66,12 +68,12 @@ def main():
             pass
 
     tool = str(ev.get("tool_name") or ev.get("toolName") or "")
-    # ---- 是否"在问你"：工具名命中，或文本里出现询问/授权措辞 ----
-    blob = (tool + " " + str(ev.get("message") or "") + " " + str(ev.get("prompt") or "")
-            + " " + json.dumps(ev.get("tool_input") or {}, ensure_ascii=False)).lower()
-    ask = tool.lower() in ASK_TOOLS or any(k in blob for k in ASK_KW)
-    if ask and status == "waiting":
-        pass
+    notification = str(ev.get("notification_type") or ev.get("notificationType") or "").lower()
+    ask = status == "waiting" and (tool.lower() in ASK_TOOLS
+                                    or notification in ASK_NOTIFICATIONS)
+    # Notification 也包含空通知和完成通知，不能一律当成等待用户。
+    if status == "waiting" and not ask:
+        return
 
     title = (ev.get("title") or ev.get("prompt") or ev.get("tool_name")
              or "会话")

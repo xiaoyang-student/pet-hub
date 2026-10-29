@@ -14,7 +14,7 @@ PetHub Bridge —— 多平台 Agent 事件桥（纯标准库，零依赖）
   单事件：
     {"platform":"WorkBuddy", "task_id":"abc", "title":"写周报",
      "status":"running|thinking|waiting|done|error", "progress":42, "message":"..."}
-  整批同步（替换该平台全部任务，适合日志轮询型连接器）：
+  整批同步（替换该平台同 src 的任务，适合日志轮询型连接器）：
     {"platform":"Codex", "type":"sync",
      "tasks":[{"task_id":"1","title":"重构模块","status":"running","progress":70}]}
   删除：
@@ -373,30 +373,62 @@ def help_html(lang="zh"):
 
 
 STATE = {}          # key -> task dict
-LOCK = threading.Lock()
-SUBS = []           # 每个订阅者一个 queue.Queue
+LOCK = threading.Lock()        # 只保护 STATE
+COMMIT_LOCK = threading.Lock()
+SUBS = []
+SUBS_LOCK = threading.Lock()
+SSE_QUEUE_SIZE = 64
+SSE_MAX_CONNECTIONS = 32
+SSE_WRITE_TIMEOUT = 5.0
 HEARTBEAT = 15
 TTL = 1800          # 任务保鲜期（秒）：30 分钟无任何新事件即视为失联并移除
+TERMINAL_TTL = 60   # 已完成/已失败的一行只再留 60 秒，不能当成任务一直挂着
+PRUNE_SEC = 15
+
+
+class Subscription:
+    def __init__(self):
+        self.queue = queue.Queue(maxsize=SSE_QUEUE_SIZE)
+        self.closed = threading.Event()
+
+
+def subscribe():
+    # 快照与登记共用提交锁，避免夹入旧事件或漏掉新事件。
+    with COMMIT_LOCK:
+        with SUBS_LOCK:
+            if len(SUBS) >= SSE_MAX_CONNECTIONS:
+                return None, None
+        snap = snapshot()
+        sub = Subscription()
+        with SUBS_LOCK:
+            SUBS.append(sub)
+        return sub, snap
+
+
+def unsubscribe(sub):
+    with SUBS_LOCK:
+        sub.closed.set()
+        if sub in SUBS:
+            SUBS.remove(sub)
 
 
 def snapshot():
     with LOCK:
-        return {"tasks": sorted(STATE.values(), key=lambda t: t["ts"]),
+        return {"tasks": sorted((dict(t) for t in STATE.values()),
+                                key=lambda t: t["ts"]),
                 "updated": time.time()}
 
 
 def broadcast(event: dict):
-    dead = []
-    for q in SUBS:
-        try:
-            q.put_nowait(event)
-        except Exception:
-            dead.append(q)
-    for q in dead:
-        try:
-            SUBS.remove(q)
-        except ValueError:
-            pass
+    with SUBS_LOCK:
+        for sub in SUBS:
+            if sub.closed.is_set():
+                continue
+            try:
+                sub.queue.put_nowait(event)
+            except queue.Full:
+                # 溢出后断流重连取快照；写超时前仍占连接名额。
+                sub.closed.set()
 
 
 APPWATCH = "应用接入"
@@ -411,9 +443,9 @@ def _app_base(task):
 
 
 def _native_platforms():
-    """除"应用接入"以外、正在上报的平台名（小写）。"""
+    """除"应用接入"以外、正在上报的平台名（小写）。**需持锁调用。**"""
     return {str(t["platform"]).strip().lower()
-            for t in list(STATE.values()) if t["platform"] != APPWATCH}
+            for t in STATE.values() if t["platform"] != APPWATCH}
 
 
 def _covered_by_native(base, owners=None):
@@ -427,12 +459,15 @@ def _covered_by_native(base, owners=None):
     return any(o and (base in o or o in base) for o in owners)
 
 
-def _drop_appwatch_dupes():
+def _drop_appwatch_dupes(outbox):
     """同一个软件既有粗粒度「应用接入」，又有它自己上报的精确任务时，只留精确那条。
 
     appwatch 会自动盯 KNOWN 里的 AI 客户端（Qoder / WorkBuddy / Cursor…），
     但这些软件本来就有 hook 或 MCP 在报，于是同一个活会出现两行。
     这里按"软件名"把粗的那条收掉，无论谁先到都能收敛。
+
+    **需持锁调用**，且不直接广播——把事件塞进 outbox，由 apply_event
+    在释放锁之后统一发出。
     """
     owners = _native_platforms()
     if not owners:
@@ -441,68 +476,177 @@ def _drop_appwatch_dupes():
             if t["platform"] == APPWATCH and _covered_by_native(_app_base(t), owners)]
     for k in drop:
         STATE.pop(k, None)
-        broadcast({"type": "removed", "key": k, "platform": APPWATCH})
+        outbox.append({"type": "removed", "key": k, "platform": APPWATCH})
+
+
+def _trace_row_for(lname, tid, overview=False):
+    for k, t in STATE.items():
+        if (str(t.get("platform") or "").strip().lower() == lname
+                and t.get("src") == "trace"
+                and (t.get("id") == tid or (overview and tid == "main"))):
+            return k
+    return None
+
+
+def _drop_trace_dupes(platform, tid, key, outbox):
+    lname = str(platform).strip().lower()
+    # Legacy hooks without a session use main; preserve their unresolved alerts.
+    drop = [k for k, t in STATE.items()
+            if k != key and str(t.get("platform") or "").strip().lower() == lname
+            and t.get("src") != "trace" and (t.get("id") == tid or
+                (t.get("id") == "main" and not t.get("src")
+                 and t.get("status") not in ("waiting", "error") and not t.get("ask")))]
+    for k in drop:
+        STATE.pop(k, None)
+        outbox.append({"type": "removed", "key": k})
+
+
+def _mk_task(platform, tid, d, src, now):
+    """统一构造任务字典。单事件与 sync 整批共用，免得两边字段对不上。"""
+    return {
+        "platform": platform,
+        "id": tid,
+        "title": d.get("title") or tid or "未命名任务",
+        "status": d.get("status", "running"),
+        "progress": d.get("progress"),
+        "message": d.get("message", ""),
+        "ask": bool(d.get("ask")),
+        # phase：细粒度阶段（received / thinking / tool / asking / denied /
+        # answering / done / stalled / error）。桥只认五个 status，更细的
+        # 语义走这个字段，由状态栏渲染成徽标。可选，老客户端忽略即可。
+        "phase": str(d.get("phase") or "")[:24],
+        "tool": str(d.get("tool") or "")[:32],
+        "turn": str(d.get("turn") or "")[:200],
+        "terminal": bool(d.get("terminal")),
+        "src": src or "",
+        "ts": now,
+    }
 
 
 def apply_event(ev: dict):
+    # 串行提交和入队，但不持状态锁做广播，也不持任何锁做网络 IO。
+    with COMMIT_LOCK:
+        return _apply_event(ev)
+
+
+def _apply_event(ev: dict):
     ev = dict(ev)
     platform = ev.get("platform") or "unknown"
     etype = ev.get("type", "update")
     now = time.time()
+    outbox = []
+    note = None
 
-    # 已经有精确来源在报这个软件了，应用接入就别再插一条（返回注明原因，方便排查）
-    if platform == APPWATCH and etype != "sync":
-        base = _app_base({"id": ev.get("task_id") or ev.get("id") or ""})
-        if _covered_by_native(base):
-            return "dup-of-native"
-
-    if etype == "sync":
-        tasks = ev.get("tasks") or []
-        keep = set()
-        for t in tasks:
-            tid = str(t.get("task_id") or t.get("id") or t.get("title", ""))
-            key = f"{platform}::{tid}"
-            keep.add(key)
-            task = {"platform": platform, "id": tid,
-                    "title": t.get("title") or tid or "未命名任务",
-                    "status": t.get("status", "running"),
-                    "progress": t.get("progress"),
-                    "message": t.get("message", ""),
-                    "ask": bool(t.get("ask")),
-                    "ts": STATE.get(key, {}).get("ts", now)}
-            if task["status"] not in ("done", "error", "waiting"):
-                task["ts"] = now
-            STATE[key] = task
-        # 删除该平台本次未上报的旧任务
-        for k in [k for k in STATE if k.startswith(platform + "::") and k not in keep]:
-            STATE.pop(k)
-            broadcast({"type": "removed", "key": k})
-        _drop_appwatch_dupes()
-        out = {"type": "snapshot", "tasks": sorted(STATE.values(), key=lambda t: t["ts"])}
-        broadcast(out)
-        return
-
-    tid = str(ev.get("task_id") or ev.get("id") or ev.get("title", ""))
-    key = f"{platform}::{tid}"
-
-    if etype == "remove":
-        STATE.pop(key, None)
-        broadcast({"type": "removed", "key": key, "platform": platform})
-        _drop_appwatch_dupes()
-        return
-
-    status = ev.get("status", "running")
-    task = {"platform": platform, "id": tid,
-            "title": ev.get("title") or tid or "未命名任务",
-            "status": status,
-            "progress": ev.get("progress"),
-            "message": ev.get("message", ""),
-            "ask": bool(ev.get("ask")),
-            "ts": now}
     with LOCK:
-        STATE[key] = task
-    broadcast({"type": "task", "task": task})
-    _drop_appwatch_dupes()
+        # 已经有精确来源在报这个软件了，应用接入就别再插一条
+        if platform == APPWATCH and etype != "sync":
+            base = _app_base({"id": ev.get("task_id") or ev.get("id") or ""})
+            if _covered_by_native(base):
+                return "dup-of-native"
+
+        if etype == "sync":
+            tasks = ev.get("tasks") or []
+            keep = set()
+            src = str(ev.get("src") or "")
+            lname = str(platform).strip().lower()
+            for t in tasks:
+                if not isinstance(t, dict):
+                    continue
+                tid = str(t.get("task_id") or t.get("id") or t.get("title", ""))
+                key = f"{platform}::{tid}"
+                keep.add(key)
+                task = _mk_task(platform, tid, t, src, now)
+                # 只有 done/error 冻结时间戳：它们不再变化，靠 TTL 自然退场。
+                # waiting **必须**继续刷新 —— 一个真在等用户拍板的任务可能
+                # 等上半小时，冻结 ts 会让它被 TTL 当成"失联"删掉，
+                # 而那恰恰是最该留在状态栏上的一行。
+                if task["status"] in ("done", "error"):
+                    task["ts"] = STATE.get(key, {}).get("ts", now)
+                trace_key = _trace_row_for(lname, tid, not src and
+                    task["status"] not in ("waiting", "error") and not task["ask"]) if src != "trace" else None
+                if trace_key and task["status"] not in ("waiting", "error"):
+                    if key != trace_key and STATE.get(key, {}).get("src", "") == src:
+                        if STATE.pop(key, None) is not None:
+                            outbox.append({"type": "removed", "key": key})
+                    continue
+                if src == "trace":
+                    _drop_trace_dupes(platform, tid, key, outbox)
+                elif trace_key and trace_key != key:
+                    STATE.pop(trace_key, None)
+                    outbox.append({"type": "removed", "key": trace_key})
+                STATE[key] = task
+            # 空快照只能清理自己的来源，不能撤销其他连接器的观察。
+            for k, t in list(STATE.items()):
+                if t["platform"] != platform or t.get("src", "") != src or k in keep:
+                    continue
+                STATE.pop(k, None)
+                outbox.append({"type": "removed", "key": k})
+            _drop_appwatch_dupes(outbox)
+            outbox.append({"type": "snapshot",
+                           "tasks": sorted((dict(t) for t in STATE.values()),
+                                           key=lambda t: t["ts"])})
+        else:
+            tid = str(ev.get("task_id") or ev.get("id") or ev.get("title", ""))
+            key = f"{platform}::{tid}"
+
+            if etype == "remove":
+                STATE.pop(key, None)
+                outbox.append({"type": "removed", "key": key,
+                               "platform": platform})
+                _drop_appwatch_dupes(outbox)
+            else:
+                status = ev.get("status", "running")
+                src = str(ev.get("src") or "")
+                lname = str(platform).strip().lower()
+                trace_key = _trace_row_for(lname, tid, not src and
+                    status not in ("waiting", "error") and not ev.get("ask"))
+                if src == "trace":
+                    _drop_trace_dupes(platform, tid, key, outbox)
+                elif trace_key and status not in ("waiting", "error"):
+                    if key != trace_key and STATE.get(key, {}).get("src", "") == src:
+                        if STATE.pop(key, None) is not None:
+                            outbox.append({"type": "removed", "key": key})
+                    note = "dup-of-trace"
+                elif trace_key and trace_key != key:
+                    STATE.pop(trace_key, None)
+                    outbox.append({"type": "removed", "key": trace_key})
+
+                if note is None:
+                    task = _mk_task(platform, tid, ev, src, now)
+                    # src 粘住：hook 补发的更新不该把已有的来源标记洗掉
+                    task["src"] = src or str(STATE.get(key, {}).get("src") or "")
+                    # 完成/失败的时间戳同样冻结，重复上报不能无限推迟退场。
+                    if task["status"] in ("done", "error"):
+                        task["ts"] = STATE.get(key, {}).get("ts", now)
+                    STATE[key] = task
+                    outbox.append({"type": "task", "task": dict(task)})
+                    _drop_appwatch_dupes(outbox)
+
+    for e in outbox:
+        broadcast(e)
+    return note
+
+
+# ---------------------------------------------------------------- 来源校验
+# "只监听 127.0.0.1"不等于安全：浏览器里的任意网页都能 fetch 到本机端口，
+# 而桌宠是一个全屏、透明、永远置顶的 WebView2，它渲染的内容直接来自这个
+# 接口。旧实现对所有响应回 Access-Control-Allow-Origin: *，等于把这个
+# 渲染面开放给了用户浏览的任何网站。
+#
+# 这里做两件事：
+#   1. CORS 不再用 *，只回显白名单内的 Origin；
+#   2. POST /api/events 直接拒绝白名单外的 Origin。
+# 第 2 条才是真正的闸门——CORS 本身拦不住跨域"简单请求"被发出去，
+# 浏览器只是不让读响应，而桌宠的副作用（显示什么）发生在服务端。
+#
+# 原生客户端（curl.exe / python 连接器 / MCP）不带 Origin 头，一律放行，
+# README 里所有接入方式都不受影响。
+ALLOWED_ORIGINS = frozenset({
+    "null",                       # WebView2 以 file:// 加载的桌宠页面
+    "file://",
+    "http://127.0.0.1:8765",      # 浏览器直接打开 / 或 /help 页
+    "http://localhost:8765",
+})
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -511,18 +655,41 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # 安静模式
 
+    # -- 来源 ------------------------------------------------------
+    def _origin(self):
+        return (self.headers.get("Origin") or "").strip()
+
+    def _origin_allowed(self):
+        o = self._origin()
+        if not o:
+            return True                     # 非浏览器客户端（curl / python / MCP）
+        if o in ALLOWED_ORIGINS:
+            return True
+        # 浏览器还会带 Sec-Fetch-Site，同源/无来源的导航放行
+        return (self.headers.get("Sec-Fetch-Site") or "").lower() \
+            in ("same-origin", "same-site", "none")
+
+    def _cors(self):
+        o = self._origin()
+        if o in ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", o)
+            self.send_header("Vary", "Origin")
+
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self._cors()
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
+        if not self._origin_allowed():
+            self._json({"ok": False, "error": "origin not allowed"}, 403)
+            return
         self._json({"ok": True})
 
     def do_GET(self):
@@ -543,7 +710,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self._cors()
             self.end_headers()
             self.wfile.write(body)
         elif p == "/api/stream":
@@ -563,40 +730,52 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "not found"}, 404)
 
     def _sse(self):
-        q = queue.Queue()
-        SUBS.append(q)
+        self.connection.settimeout(SSE_WRITE_TIMEOUT)
+        self.close_connection = True
+        sub, initial = subscribe()
+        if sub is None:
+            self._json({"ok": False, "error": "too many streams"}, 503)
+            return
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Connection", "close")
+            self._cors()
             self.end_headers()
-            snap = json.dumps(snapshot(), ensure_ascii=False)
+            snap = json.dumps(initial, ensure_ascii=False)
+            initial = None
             self.wfile.write(f"event: snapshot\ndata: {snap}\n\n".encode("utf-8"))
             self.wfile.flush()
-            last_beat = time.time()
-            while True:
+            snap = None
+            last_beat = time.monotonic()
+            while not sub.closed.is_set():
                 try:
-                    ev = q.get(timeout=1.0)
+                    ev = sub.queue.get(timeout=1.0)
+                    if sub.closed.is_set():
+                        break
                     data = json.dumps(ev, ensure_ascii=False)
                     self.wfile.write(f"data: {data}\n\n".encode("utf-8"))
+                    ev = data = None
                 except queue.Empty:
-                    if time.time() - last_beat > HEARTBEAT:
+                    if time.monotonic() - last_beat > HEARTBEAT:
                         self.wfile.write(b": ping\n\n")
-                        last_beat = time.time()
+                        last_beat = time.monotonic()
                 self.wfile.flush()
         except (ConnectionAbortedError, BrokenPipeError, OSError):
             pass
         finally:
-            try:
-                SUBS.remove(q)
-            except ValueError:
-                pass
+            unsubscribe(sub)
 
     def do_POST(self):
         p = self.path.split("?")[0]
         if p != "/api/events":
             self._json({"ok": False, "error": "not found"}, 404)
+            return
+        # 这道闸比 CORS 头重要：跨域"简单请求"照样能发出去，
+        # 浏览器只是不让网页读响应——而桌宠的副作用发生在服务端。
+        if not self._origin_allowed():
+            self._json({"ok": False, "error": "origin not allowed"}, 403)
             return
         raw = ""
         try:
@@ -615,22 +794,33 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "note": note} if note else {"ok": True})
 
 
+def prune_once(now=None):
+    now = time.time() if now is None else now
+    with COMMIT_LOCK:
+        with LOCK:
+            dead = []
+            for k, t in STATE.items():
+                age = now - t.get("ts", now)
+                limit = TERMINAL_TTL if t.get("status") in ("done", "error") else TTL
+                if age > limit:
+                    dead.append(k)
+            for k in dead:
+                STATE.pop(k, None)
+        for k in dead:
+            broadcast({"type": "removed", "key": k})
+
+
 def prune_loop():
-    """任务保鲜：超过 TTL 没有任何新事件的任务一律移除。
+    """任务保鲜：完成/失败 60 秒退场；长时间无事件的按 30 分钟失联移除。
 
     这是"不说谎"的底线——应用可能崩溃/被关闭而永远不会发来 done，
-    与其让桌宠一直显示"还在跑"，不如当作失联处理。
+    与其让桌宠一直显示"还在跑"，不如当作失联处理。反过来，已经
+    done/error 的行也不该继续当成一个活任务留在托盘里。
     """
     while True:
-        time.sleep(60)
+        time.sleep(PRUNE_SEC)
         try:
-            now = time.time()
-            with LOCK:
-                dead = [k for k, t in STATE.items() if now - t.get("ts", now) > TTL]
-                for k in dead:
-                    STATE.pop(k, None)
-            for k in dead:
-                broadcast({"type": "removed", "key": k})
+            prune_once()
         except Exception:
             pass
 

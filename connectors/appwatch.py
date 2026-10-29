@@ -12,7 +12,10 @@ appwatch.py —— PetHub 通用应用观察器（"导入任意软件"的运行�
 
 产出：向 bridge（127.0.0.1:8765）推送任务，platform = "应用接入"
   task_id = "app:<exe>"；标题 = 「应用名 · 当前窗口标题」
-  忙 → running；安静 8 秒 → done；进程退出 → 直接移除
+  有动静 → running；长时间安静 → 只标 observe（观察中），到点直接撤回；
+  进程退出 → 直接移除。
+  注意：CPU/标题只是启发式证据，**永远不推断 done**——"看起来安静了"
+  既可能真的结束，也可能只是停在等用户授权，报完成比报未知更糟。
 
 用法：
   pythonw appwatch.py            # 常驻（壳层启动时自动拉起）
@@ -40,8 +43,8 @@ POLL = 2.0                 # 轮询间隔（秒）
 #   CPU 增量 > 0.30 秒 / 2 秒 = 真的在算（大于 15% 单核）
 #   标题变了                     = 在换活干（哪怕 CPU 不高，比如等接口回包）
 CPU_BUSY = 0.30
-QUIET_DONE = 22.0          # 安静这么久才算这一轮干完（AI 应用等接口时 CPU 是闲的，给足余量）
-DONE_REMOVE = 60.0         # done 之后留这么久再从面板上撤掉
+QUIET_OBSERVE = 22.0       # 安静这么久只改成"观察中"（AI 应用等接口时 CPU 本来就是闲的）
+QUIET_REMOVE = 90.0        # 再安静这么久就直接从面板撤掉；绝不写成 done
 
 # 首次运行自动纳入观察的 AI 客户端（只认这些，别把 VS Code 当成"在跑任务"）
 KNOWN = {
@@ -217,7 +220,8 @@ class Watcher:
     def step(self, app, procs, titles, now):
         exe, name = app["exe"], app["name"]
         s = self.st.setdefault(exe, {"cpu": 0.0, "title": "", "quiet": now, "alive": False,
-                                     "status": "idle", "tid": "app:" + exe})
+                                     "status": "idle", "observed": False,
+                                     "tid": "app:" + exe})
         pids = procs.get(exe) or []
         if not pids:
             s["alive"] = False
@@ -258,19 +262,24 @@ class Watcher:
 
         if busy:
             s["quiet"] = now
+            s["observed"] = False
             body = {"platform": PLATFORM, "task_id": s["tid"], "status": "running",
                     "title": (name + " · " + title)[:48] if title else (name + " · 正在处理"),
                     "message": title[:70]}
             post(body)
             s["status"] = "running"
-        elif s["status"] in ("running", "done") and now - s["quiet"] > QUIET_DONE:
-            if s["status"] == "running":
-                post({"platform": PLATFORM, "task_id": s["tid"], "status": "done",
-                      "title": (name + " · " + s["title"])[:48] if s["title"] else (name + " · 空闲")})
-                s["status"] = "done"
-            elif now - s["quiet"] > QUIET_DONE + DONE_REMOVE:
+        elif s["status"] == "running" and now - s["quiet"] > QUIET_OBSERVE:
+            if not s.get("observed"):
+                post({"platform": PLATFORM, "task_id": s["tid"], "status": "running",
+                      "phase": "observing",
+                      "title": (name + " · " + s["title"])[:48] if s["title"]
+                      else (name + " · 空闲"),
+                      "message": "没有可确认的结束信号，仍在观察"})
+                s["observed"] = True
+            if now - s["quiet"] > QUIET_REMOVE:
                 post({"platform": PLATFORM, "type": "remove", "task_id": s["tid"]})
                 s["status"] = "idle"
+                s["observed"] = False
 
 
 def main():
