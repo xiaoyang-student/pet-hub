@@ -29,6 +29,9 @@
 >
 > 完整版本历史见 [Releases](https://github.com/xiaoyang-student/pet-hub/releases)。
 
+> **想回退到旧版？** 每个版本都留了备份：`git checkout backup/v1.2.0` 可直接回到 v1.2.0，
+> 也可用 `git revert <提交号>` 单独撤销某次改动。标签 `v1.2.0` / 分支 `backup/v1.2.0` 都保留在远端。
+
 > 仓库所有者：发布 Releases 后，把上面链接里的 `xiaoyang-student/pet-hub` 换成你的实际地址即可。
 
 ---

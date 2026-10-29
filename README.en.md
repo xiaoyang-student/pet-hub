@@ -38,6 +38,10 @@ runtime and need no administrator rights.
 >
 > Full history: [Releases](https://github.com/xiaoyang-student/pet-hub/releases).
 
+> **Need to roll back?** Every version is kept: `git checkout backup/v1.2.0` returns to v1.2.0,
+> or `git revert <commit>` undoes a single change. Both tag `v1.2.0` and branch `backup/v1.2.0`
+> stay on the remote.
+
 > Repo owner: after publishing a Release, replace `xiaoyang-student/pet-hub` above with your real repository path.
 
 ---
