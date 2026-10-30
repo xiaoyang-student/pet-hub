@@ -9,6 +9,10 @@
 A little pet that lives on your desktop and keeps an eye on what Qoder, WorkBuddy, Doubao… are doing.
 **Everything it says is reported by the apps themselves — the pet never guesses and never makes things up.**
 
+> 🔍 **How it differs**: Agent Standup, herdr and agenttrail all watch Claude Code / Codex / OpenCode.
+> This one watches the **Chinese AI office apps** nobody else covers — Qoder, WorkBuddy, ZCode,
+> Qwen Work, Doubao Work, Doubao and Baidu Dazi.
+
 > 中文版见 [README.md](README.md)
 
 ---

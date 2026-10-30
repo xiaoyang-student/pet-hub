@@ -9,6 +9,9 @@
 一只住在桌面上的宠物，替你盯着 Qoder、WorkBuddy、豆包……在干什么。
 **它说的话都是应用自己上报的，宠物不猜、不编。**
 
+> 🔍 **和同类工具的区别**：Agent Standup、herdr、agenttrail 这些盯的都是 Claude Code / Codex / OpenCode。
+> 这个盯的是**国产 AI 办公软件** —— Qoder、WorkBuddy、ZCode、千问办公、豆包工作、豆包、百度搭子 —— 目前只有它管这批。
+
 > 英文版见 [README.en.md](README.en.md)
 
 ---
