@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PetHub · 桌面宠物 —— 替你盯着 8 款 AI 在干什么</title>
+<meta name="description" content="一只住在桌面上的宠物，实时显示 Qoder、WorkBuddy、千问办公、豆包等 8 款 AI 办公软件在干什么。它说的话全部来自应用自己上报，不猜不编。纯本地不联网，免管理员权限。">
+<meta property="og:title" content="PetHub · 桌面宠物">
+<meta property="og:description" content="替你盯着 8 款 AI 在干什么 —— 它说的每个字都来自应用自己上报，不猜不编。">
+<meta property="og:type" content="website">
+<style>
+  :root{
+    --bg:#0b0f16; --bg2:#111823; --card:#151d29; --line:#232d3d;
+    --txt:#e6edf6; --dim:#93a3b8; --acc:#4cc2ff; --acc2:#7c5cff;
+    --ok:#3fb950; --warn:#e3b341; --err:#f85149;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.75; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--acc);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:920px;margin:0 auto;padding:0 24px}
+  .lang{position:fixed;top:16px;right:20px;z-index:9;font-size:13px}
+  .lang a{color:var(--dim);border:1px solid var(--line);padding:5px 12px;border-radius:20px;background:rgba(17,24,35,.85)}
+  .lang a:hover{color:var(--txt);text-decoration:none}
+
+  /* hero */
+  header{padding:88px 0 64px;text-align:center;
+    background:radial-gradient(900px 400px at 50% -10%,rgba(76,194,255,.16),transparent 70%)}
+  .badge{display:inline-block;font-size:12px;color:var(--acc);border:1px solid rgba(76,194,255,.4);
+    padding:4px 14px;border-radius:20px;margin-bottom:22px;background:rgba(76,194,255,.08)}
+  h1{font-size:44px;line-height:1.25;font-weight:800;letter-spacing:-.5px}
+  h1 em{font-style:normal;background:linear-gradient(92deg,var(--acc),var(--acc2));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--dim);font-size:18px;margin-top:18px;max-width:640px;margin-inline:auto}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+  .btn{display:inline-block;padding:14px 30px;border-radius:10px;font-weight:600;font-size:15px;
+    border:1px solid var(--line);transition:.18s}
+  .btn-p{background:linear-gradient(92deg,var(--acc),var(--acc2));color:#06121f;border-color:transparent}
+  .btn-p:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(76,194,255,.28);text-decoration:none}
+  .btn-s{background:var(--card);color:var(--txt)}
+  .btn-s:hover{border-color:var(--acc);text-decoration:none}
+  .meta{margin-top:22px;color:#6b7c93;font-size:13px}
+  .meta span{margin:0 10px}
+
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  h2{font-size:27px;margin-bottom:8px;letter-spacing:-.3px}
+  .lead{color:var(--dim);margin-bottom:28px;font-size:15px}
+
+  /* 场景 */
+  .scene{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:26px 28px}
+  .scene p{color:var(--dim);font-size:16px}
+  .scene strong{color:var(--txt)}
+
+  /* 卖点 */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+  .card h3{font-size:16px;margin-bottom:8px;display:flex;align-items:center;gap:9px}
+  .card p{color:var(--dim);font-size:14px;line-height:1.7}
+  .ico{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-size:15px;
+    background:rgba(76,194,255,.12);border:1px solid rgba(76,194,255,.25)}
+
+  /* 状态栏示意 */
+  .shot{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:20px;margin-top:8px}
+  .shot-bar{display:flex;align-items:center;gap:8px;padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .row{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:9px;
+    background:var(--card);border:1px solid var(--line);margin-bottom:9px;font-size:14px}
+  .row:last-child{margin-bottom:0}
+  .row .who{font-weight:600;min-width:78px;font-size:13px}
+  .row .msg{color:var(--dim);flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .st{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600}
+  .run{color:var(--acc);background:rgba(76,194,255,.12)}
+  .think{color:var(--warn);background:rgba(227,179,65,.12)}
+  .wait{color:var(--warn);background:rgba(227,179,65,.18)}
+  .done{color:var(--ok);background:rgba(63,185,80,.12)}
+  .bar{height:3px;border-radius:2px;background:var(--line);margin-top:7px;overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+  .cap{text-align:center;color:#6b7c93;font-size:12px;margin-top:12px}
+
+  /* 软件列表 */
+  .apps{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px}
+  .apps span{background:var(--card);border:1px solid var(--line);border-radius:8px;
+    padding:7px 14px;font-size:13px;color:var(--txt)}
+  .apps span b{color:#6b7c93;font-weight:400;font-size:11px;margin-left:5px}
+
+  /* 步骤 */
+  .steps{counter-reset:s}
+  .step{display:flex;gap:16px;margin-bottom:20px}
+  .step .n{flex:none;width:30px;height:30px;border-radius:50%;background:rgba(76,194,255,.14);
+    border:1px solid rgba(76,194,255,.3);color:var(--acc);display:grid;place-items:center;font-weight:700;font-size:14px}
+  .step h4{font-size:15px;margin-bottom:3px}
+  .step p{color:var(--dim);font-size:14px}
+  code{background:#0a0e15;border:1px solid var(--line);border-radius:5px;padding:2px 7px;font-size:12.5px;color:#a5d6ff}
+
+  /* FAQ */
+  details{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:16px 20px;margin-bottom:11px}
+  summary{cursor:pointer;font-weight:600;font-size:15px;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"＋";float:right;color:var(--dim)}
+  details[open] summary::after{content:"－"}
+  details p{color:var(--dim);font-size:14px;margin-top:11px}
+
+  /* 结尾 */
+  .final{text-align:center;padding:76px 0 70px;border-top:1px solid var(--line);
+    background:radial-gradient(700px 300px at 50% 120%,rgba(124,92,255,.16),transparent 70%)}
+  .final h2{margin-bottom:14px}
+  .final p{color:var(--dim);max-width:520px;margin:0 auto 28px;font-size:15px}
+  footer{padding:30px 0;color:#5a6b80;font-size:13px;text-align:center;border-top:1px solid var(--line)}
+  @media(max-width:640px){h1{font-size:31px}.wrap{padding:0 18px}header{padding:60px 0 44px}}
+</style>
+</head>
+<body>
+
+<div class="lang"><a href="#en">English ↓</a></div>
+
+<header>
+  <div class="wrap">
+    <div class="badge">🆓 开源 · MIT · Windows</div>
+    <h1>同时开着五六个 AI，<br><em>到底谁在干活、谁在等你？</em></h1>
+    <p class="sub">一只住在桌面上的小宠物，替你盯着 8 款 AI 办公软件的每一步。
+      它说的每个字都来自这些应用自己写下的记录 —— <strong>不猜、不编</strong>。</p>
+    <div class="cta">
+      <a class="btn btn-p" href="https://github.com/xiaoyang-student/pet-hub/releases/latest">↓ 免费下载（130 MB）</a>
+      <a class="btn btn-s" href="https://github.com/xiaoyang-student/pet-hub">⭐ 去 GitHub 点个 Star</a>
+    </div>
+    <p class="meta">
+      <span>v1.2.1</span>·<span>免管理员权限</span>·<span>纯本地不联网</span>·<span>自带运行时</span>
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="scene">
+      <p>你开了 Qoder 写需求、千问办公改 PPT、豆包查资料，切回去一看 ——
+        其中一个早就卡在 <strong>「等你确认」</strong> 上了，白白晾了十分钟。</p>
+      <p style="margin-top:14px">AI 工具越来越多，但<strong>没有一个地方能同时看到它们在干什么</strong>。
+        PetHub 就是为这件事而生的。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>它到底显示什么</h2>
+    <p class="lead">下面是桌宠状态栏的真实结构示意 —— 每个 AI 一行，卡住就是卡住，完成就是完成。</p>
+    <div class="shot">
+      <div class="shot-bar">
+        <i class="dot" style="background:#f85149"></i><i class="dot" style="background:#e3b341"></i><i class="dot" style="background:#3fb950"></i>
+        <span style="color:#93a3b8;font-size:12.5px;margin-left:6px">PetHub · 进行中 3</span>
+      </div>
+      <div class="row">
+        <span class="who">Qoder</span>
+        <div style="flex:1">
+          <div class="msg">重构登录模块：正在改 AuthService.cs</div>
+          <div class="bar"><i style="width:62%"></i></div>
+        </div>
+        <span class="st run">进行中 62%</span>
+      </div>
+      <div class="row">
+        <span class="who">千问办公</span>
+        <div style="flex:1">
+          <div class="msg">正在整理季度汇报大纲</div>
+          <div class="bar"><i style="width:38%"></i></div>
+        </div>
+        <span class="st think">思考中</span>
+      </div>
+      <div class="row">
+        <span class="who">百度搭子</span>
+        <div style="flex:1"><div class="msg">是否允许删除 build/ 目录？</div></div>
+        <span class="st wait">等你确认</span>
+      </div>
+      <div class="row">
+        <span class="who">豆包</span>
+        <div style="flex:1"><div class="msg">已生成周报初稿</div></div>
+        <span class="st done">已完成</span>
+      </div>
+      <p class="cap">↑ UI 结构示意（真实界面以实际运行为准）</p>
+    </div>
+
+    <div class="apps">
+      <span>WorkBuddy<b>trace</b></span><span>Qoder<b>SQLite</b></span><span>ZCode<b>日志</b></span>
+      <span>千问办公<b>事件流</b></span><span>豆包工作<b>引擎日志</b></span><span>豆包<b>引擎日志</b></span>
+      <span>百度搭子<b>AgtEvent</b></span><span>ChatGPT<b>rollout</b></span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>为什么它不会骗你</h2>
+    <p class="lead">市面上大多数"AI 状态"是猜的。PetHub 只做一件事：读应用自己写下来的东西。</p>
+    <div class="grid">
+      <div class="card">
+        <h3><i class="ico">📖</i>读真实记录</h3>
+        <p>直接读各软件落盘的 trace span、SQLite 会话库、引擎日志与事件流，
+           而不是靠"进程还在不在"去猜。</p>
+      </div>
+      <div class="card">
+        <h3><i class="ico">🚫</i>读不到就不说</h3>
+        <p>没有信号时它只讲客观事实，例如"Qoder 已经 7 分钟没有新消息了"，
+           绝不替你推断成"它在等你"。</p>
+      </div>
+      <div class="card">
+        <h3><i class="ico">🔒</i>纯本地不联网</h3>
+        <p>所有通信都在本机 <code>127.0.0.1</code>。不采集聊天正文，不读你的文件，
+           不需要管理员权限。</p>
+      </div>
+      <div class="card">
+        <h3><i class="ico">🗂️</i>一行一软件</h3>
+        <p>同一个会话的多轮问答合并成一行；完成后 60 秒自动退场，不会永远挂着"在办公"。</p>
+      </div>
+      <div class="card">
+        <h3><i class="ico">📦</i>免安装依赖</h3>
+        <p>安装包自带 Python 3.13 运行时，双击即用，不读系统 PATH、不污染环境。</p>
+      </div>
+      <div class="card">
+        <h3><i class="ico">🧭</i>装哪儿都能找到</h3>
+        <p>不写死任何盘符：运行时枚举本机真实硬盘，正在运行的软件直接从进程定位安装位置。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>三步用起来</h2>
+    <p class="lead">全程不需要装任何东西，也不需要管理员权限。</p>
+    <div class="steps">
+      <div class="step">
+        <div class="n">1</div>
+        <div><h4>下载安装包</h4>
+          <p>Releases 里的 <code>PetHub-Setup-v1.2.1.exe</code>，双击即可；也可以下便携版 <code>.zip</code> 解压即用。</p></div>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <div><h4>装完就开始工作</h4>
+          <p>它自动发现你装了哪几款 AI，只跟踪装了的。想看更多细节，双击 <code>agent-trace\start-tracer.bat</code>。</p></div>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <div><h4>顺手撸一下宠物</h4>
+          <p>右键有喂食、抚摸、睡觉；能养最多 6 只，它们会长大、交朋友，偶尔还吵架。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>常见问题</h2>
+    <div style="margin-top:20px">
+      <details><summary>会不会拖慢电脑？</summary>
+        <p>常驻约 60–90 MB。只在有动画时重绘，没有整屏扫描、没有 OCR。追踪器每 10 秒读一次增量。</p></details>
+      <details><summary>我的聊天内容会被上传吗？</summary>
+        <p>不会。全程只在本机回环 <code>127.0.0.1:8765</code> 通信，不联网、不采集正文，
+           只接收"谁 / 在做什么 / 状态 / 百分比"这类元信息。代码开源，可自行审计。</p></details>
+      <details><summary>我常用的 AI 不在名单里怎么办？</summary>
+        <p>来 GitHub 提个 Issue 说明它把数据存在哪儿，我评估适配；也会写怎么自己加适配器。
+           已知可行的是读它的本地日志或数据库。</p></details>
+      <details><summary>卸载干净吗？</summary>
+        <p>干净。卸载会停任务、删文件、清注册表与自启项、移除 MCP 注册，不动你其它软件的环境。
+            每个版本还留了 <code>backup</code> 分支可回退。</p></details>
+      <details><summary>收费吗？</summary>
+        <p>完全免费，MIT 协议开源。唯一的"报酬"是你在 GitHub 上点个 Star ⭐。</p></details>
+    </div>
+  </div>
+</section>
+
+<div class="final">
+  <div class="wrap">
+    <h2>这是你见过的最没用的小工具，<br>也可能是一装上就回不去的那个</h2>
+    <p>一个人做的小作品。现在最缺的不是代码，是真实用户的一句话 ——
+      哪里别扭、想要什么、你常用的哪款 AI 还没被跟踪，都欢迎告诉我。</p>
+    <div class="cta">
+      <a class="btn btn-p" href="https://github.com/xiaoyang-student/pet-hub/releases/latest">↓ 下载试试</a>
+      <a class="btn btn-s" href="https://github.com/xiaoyang-student/pet-hub">⭐ Star 一下</a>
+    </div>
+    <p style="margin-top:26px;font-size:13px;color:#6b7c93">
+      觉得有用？把它转给那个"同时开五个 AI、经常忘了哪个还在跑"的朋友 🙏</p>
+  </div>
+</div>
+
+<section id="en" style="border-top:1px solid var(--line)">
+  <div class="wrap">
+    <h2>English</h2>
+    <p class="lead" style="margin-bottom:18px">
+      A desktop pet that watches what <strong>Qoder, WorkBuddy, ZCode, Qwen Work, Doubao Work, Doubao,
+      Baidu Dazi and ChatGPT</strong> are doing — one row per app, right on your desktop.
+      Everything it says comes from data the apps themselves write; <strong>it never guesses</strong>.
+      Fully local (<code>127.0.0.1</code>), no admin rights, no internet.</p>
+    <p style="color:var(--dim);font-size:14px">
+      Grab <code>PetHub-Setup-v1.2.1.exe</code> from
+      <a href="https://github.com/xiaoyang-student/pet-hub/releases/latest">Releases</a>, or the
+      portable <code>.zip</code>. MIT licensed — a star on
+      <a href="https://github.com/xiaoyang-student/pet-hub">GitHub</a> is the best way to say thanks.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    PetHub · MIT License ·
+    <a href="https://github.com/xiaoyang-student/pet-hub">GitHub</a> ·
+    <a href="https://github.com/xiaoyang-student/pet-hub/releases/latest">下载</a> ·
+    <a href="https://github.com/xiaoyang-student/pet-hub/issues">提建议</a>
+  </div>
+</footer>
+
+</body>
+</html>
